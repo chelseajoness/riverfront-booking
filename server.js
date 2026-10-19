@@ -413,16 +413,23 @@ app.post('/api/admin/bookings', requireOwner, async (req, res) => {
   const b = req.body || {};
   const site = parseInt(b.site, 10);
   if (!(site >= 1 && site <= PARK.sites)) return res.status(400).json({ error: `Site must be 1–${PARK.sites}.` });
-  if (!isISO(b.checkIn) || !isISO(b.checkOut) || b.checkOut <= b.checkIn) return res.status(400).json({ error: 'Check the dates.' });
+  if (!isISO(b.checkIn)) return res.status(400).json({ error: 'Pick the first date.' });
+  if (!isISO(b.checkOut)) return res.status(400).json({ error: 'Pick the end date.' });
+  if (b.checkOut <= b.checkIn) return res.status(400).json({ error: b.kind === 'block' ? 'The last day closed can\'t be before the first day.' : 'The leave date has to be after the arrive date.' });
   const kind = b.kind === 'block' ? 'block' : 'booking';
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(42)');
     const { rows: clash } = await client.query(
-      `SELECT id, guest_name FROM bookings WHERE site=$1 AND ${ACTIVE} AND check_in < $3 AND check_out > $2 LIMIT 1`,
+      `SELECT id, guest_name, status, notes, check_in, check_out FROM bookings WHERE site=$1 AND ${ACTIVE} AND check_in < $3 AND check_out > $2 ORDER BY check_in LIMIT 1`,
       [site, b.checkIn, b.checkOut]);
-    if (clash.length) { await client.query('ROLLBACK'); return res.status(409).json({ error: `Site ${site} is already taken for some of those dates.` }); }
+    if (clash.length) {
+      await client.query('ROLLBACK');
+      const c = clash[0], who = c.status === 'blocked' ? `already blocked${c.notes ? ` (${c.notes})` : ''}` : `booked by ${c.guest_name || 'a guest'}`;
+      const span = c.status === 'blocked' ? `${fmtDate(iso(c.check_in))} through ${fmtDate(addDays(iso(c.check_out), -1))}` : `${fmtDate(iso(c.check_in))} to ${fmtDate(iso(c.check_out))}`;
+      return res.status(409).json({ error: `Site ${site} is ${who} ${span}. Pick other dates or another site.` });
+    }
     const { rows: [row] } = await client.query(
       `INSERT INTO bookings (site, check_in, check_out, plan, status, amount_cents, guest_name, guest_phone, notes, source)
        VALUES ($1,$2,$3,$4,$5,0,$6,$7,$8,'owner') RETURNING id`,

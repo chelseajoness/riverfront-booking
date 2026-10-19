@@ -13,7 +13,7 @@
 @media (prefers-color-scheme:dark){:root{--bg:#0F1714;--surface:#17221E;--ink:#E6ECE8;--muted:#9AA8A1;--line:#2A3832;--river:#4FB3AA;--on-river:#06201D;--river-soft:#183330;--amber:#E0A34A;--amber-soft:#3A2D18;--block:#33403A;--danger:#E57B69;--danger-soft:#3A1F1A;color-scheme:dark}}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Work Sans",system-ui,sans-serif;-webkit-text-size-adjust:100%}
+body{margin:0;overflow-x:clip;background:var(--bg);color:var(--ink);font:15px/1.5 "Work Sans",system-ui,sans-serif;-webkit-text-size-adjust:100%}
 :focus-visible{outline:3px solid var(--amber);outline-offset:2px}
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);background:var(--pine);z-index:30}
 
@@ -36,6 +36,8 @@ main{max-width:1100px;margin:0 auto;padding:22px max(16px,env(safe-area-inset-ri
 .panel{display:grid;grid-template-columns:minmax(0,1fr);gap:26px}
 h2{font:700 1.35rem "Zilla Slab",Georgia,serif;margin:0 0 12px}
 .hint{color:var(--muted);margin:-6px 0 12px;font-size:.92rem}
+.toast{pointer-events:none;position:fixed;left:16px;right:16px;margin-inline:auto;width:fit-content;text-align:center;bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:40;background:var(--ink);color:var(--bg);padding:12px 18px;border-radius:12px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:calc(100% - 32px)}
+@media (max-width:720px){.toast{bottom:calc(84px + env(safe-area-inset-bottom,0px))}}
 .banner{background:var(--danger-soft);color:var(--ink);border-radius:10px;padding:12px 14px;margin-bottom:16px}
 
 /* stats */
@@ -73,7 +75,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--river);b
 .msg{grid-column:1/-1;font-size:.92rem;color:var(--danger);margin:0} .msg:empty{display:none}
 .seg{display:flex;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:3px;gap:3px}
 .seg label{flex:1;display:block;text-align:center;padding:9px;border-radius:8px;cursor:pointer;font-weight:600}
-.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg label{position:relative}
+.seg input{position:absolute;inset:0;width:100%;height:100%;margin:0;padding:0;opacity:0;pointer-events:none}
 .seg label:has(input:checked){background:var(--surface);box-shadow:0 1px 3px rgba(0,0,0,.12);color:var(--river)}
 .newlink{margin-top:12px;background:var(--river-soft);border-radius:12px;padding:14px;display:grid;gap:10px}
 .copyrow{display:flex;gap:8px;flex-wrap:wrap}
@@ -138,6 +141,7 @@ table.grid{border-collapse:separate;border-spacing:0;font-size:.78rem}
 
 <main>
   <div class="banner" id="banner" hidden></div>
+  <div class="toast" id="toast" role="status" hidden></div>
 
   <!-- TODAY -->
   <section class="panel" id="p-today">
@@ -201,19 +205,20 @@ table.grid{border-collapse:separate;border-spacing:0;font-size:.78rem}
     <div>
       <h2>Add a booking or block a site</h2>
       <p class="hint">For phone and walk-in guests, or to close a site for repairs. It shows on the calendar and stops online bookings for those dates.</p>
-      <form class="box" id="add">
+      <form class="box" id="add" novalidate>
         <div class="full seg" role="radiogroup" aria-label="Type">
           <label><input type="radio" name="a-kind" value="booking" checked>Guest booking</label>
           <label><input type="radio" name="a-kind" value="block">Block site</label>
         </div>
         <label>Site<select id="a-site"></select></label>
-        <label>Arrive<input type="date" id="a-in" required></label>
-        <label>Leave<input type="date" id="a-out" required></label>
+        <label><span id="a-in-l">Arrive</span><input type="date" id="a-in" required></label>
+        <label><span id="a-out-l">Leave</span><input type="date" id="a-out" required></label>
         <label class="guest">Guest name<input id="a-name" maxlength="100" autocomplete="off"></label>
         <label class="guest">Phone<input id="a-phone" maxlength="30" inputmode="tel" autocomplete="off"></label>
         <label>Notes<input id="a-notes" maxlength="300" placeholder="Paid cash, monthly, etc."></label>
         <button class="primary" type="submit" id="a-save">Save booking</button>
         <p class="msg" id="a-msg"></p>
+        <p class="hint full" id="a-sum" style="margin:0"></p>
       </form>
     </div>
   </section>
@@ -268,7 +273,7 @@ async function load(){
 function render(){
   const {today,sites,bookings}=DATA;
   if(!$('a-site').options.length) for(let s=1;s<=sites;s++) $('a-site').add(new Option('Site '+s,s));
-  if(!$('a-in').value){ $('a-in').value=today; $('a-out').value=addDays(today,1); }
+  if(!$('a-in').value){ $('a-in').value=today; $('a-out').value=addDays(today,1); addSummary(); }
   const occ=(b,d)=>b.check_in<=d && b.check_out>d;
   const live=bookings.filter(b=>b.status!=='cancelled');
   $('st-tonight').textContent = new Set(live.filter(b=>b.status!=='blocked'&&occ(b,today)).map(b=>b.site)).size + ' / ' + sites;
@@ -286,7 +291,7 @@ function render(){
       if(!b) return '<td></td>';
       const cls=b.status==='blocked'?'x':b.status==='pending'?'p':'b';
       const t=b.status==='blocked'?'Blocked':(b.guest_name||'Guest');
-      const info=`Site ${s}: ${t}, ${short(b.check_in)} to ${short(b.check_out)}`;
+      const info=b.status==='blocked'?`Site ${s}: blocked${b.notes?' ('+b.notes+')':''}, ${short(b.check_in)} through ${short(addDays(b.check_out,-1))}`:`Site ${s}: ${t}, ${short(b.check_in)} to ${short(b.check_out)}`;
       return `<td class="${cls}" title="${esc(info)}" data-info="${esc(info)}">${b.check_in===d||d===today?esc((t||'').split(' ')[0].slice(0,5)):''}</td>`;
     }).join('')+'</tr>';
   }
@@ -305,7 +310,7 @@ function render(){
     return `<div class="card"><div class="badge"><span><small>Site</small>${b.site}</span></div>
       <div class="name">${esc(title)} ${here}${pill}${alert}</div>
       <div class="acts">${b.status==='pending'?'':`<button data-cancel="${b.id}">${b.status==='blocked'?'Remove block':'Cancel'}</button>`}</div>
-      <div class="meta">${short(b.check_in)} → ${short(b.check_out)} · ${esc(b.plan==='owner'?'phone booking':b.plan)}${b.amount_cents?` · ${money(b.amount_cents)} paid`:''}</div>
+      <div class="meta">${b.status==='blocked'?`Closed ${short(b.check_in)} through ${short(addDays(b.check_out,-1))}`:`${short(b.check_in)} → ${short(b.check_out)} · ${esc(b.plan==='owner'?'phone booking':b.plan)}`}${b.amount_cents?` · ${money(b.amount_cents)} paid`:''}</div>
       ${contact||rig?`<div class="meta">${[contact,rig].filter(Boolean).join('<br>')}</div>`:''}
       ${b.notes&&b.status!=='blocked'?`<div class="meta">${esc(b.notes)}</div>`:''}</div>`;
   }).join('') : '<p class="empty">No upcoming stays yet. Add a phone booking from the Add tab, or wait for online bookings.</p>';
@@ -318,19 +323,68 @@ $('list').addEventListener('click',e=>{
 });
 
 /* add booking / block */
-document.querySelectorAll('input[name=a-kind]').forEach(r=>r.addEventListener('change',()=>{
-  const block=document.querySelector('input[name=a-kind]:checked').value==='block';
+const isBlock=()=>document.querySelector('input[name=a-kind]:checked').value==='block';
+function toast(t){ const el=$('toast'); el.textContent=t; el.hidden=false; clearTimeout(toast.t); toast.t=setTimeout(()=>el.hidden=true,3500); }
+function addMode(){
+  const block=isBlock();
   document.querySelectorAll('#add .guest').forEach(el=>el.hidden=block);
   $('a-save').textContent=block?'Block site':'Save booking';
-  $('a-notes').placeholder=block?'Reason (shows on calendar)':'Paid cash, monthly, etc.';
-}));
+  $('a-notes').placeholder=block?'Reason, e.g. water line repair':'Paid cash, monthly, etc.';
+  $('a-in-l').textContent=block?'First day closed':'Arrive';
+  $('a-out-l').textContent=block?'Last day closed':'Leave';
+  const sel=$('a-site'), all=sel.querySelector('option[value=all]');
+  if(block && !all) sel.add(new Option('All sites (close the park)','all'),0);
+  if(!block && all){ all.remove(); if(!sel.value) sel.selectedIndex=0; }
+  // keep the end date sensible when switching: a block's end is inclusive, a booking's is the leave day
+  outTouched=false; syncEnd(); addSummary();
+}
+function addSummary(){
+  const a=$('a-in').value, b=$('a-out').value, site=$('a-site').value; let t='';
+  if(a&&b){
+    const siteTxt = site==='all' ? 'All sites' : 'Site '+site;
+    if(isBlock()){ if(b>=a){ const n=Math.round((toD(b)-toD(a))/DAY)+1; t=`${siteTxt} closed ${short(a)} through ${short(b)} (${n} night${n>1?'s':''}). Open again ${short(addDays(b,1))}.`; } }
+    else if(b>a){ const n=Math.round((toD(b)-toD(a))/DAY); t=`${siteTxt}: ${n} night${n>1?'s':''}, ${short(a)} to ${short(b)}.`; }
+  }
+  $('a-sum').textContent=t;
+}
+document.querySelectorAll('input[name=a-kind]').forEach(r=>r.addEventListener('change',addMode));
+let outTouched=false;
+$('a-out').addEventListener('input',()=>{ outTouched=true; });
+function syncEnd(){
+  const a=$('a-in').value; if(!a) return;
+  const minOut = isBlock() ? a : addDays(a,1);
+  $('a-out').min=minOut;
+  if(!outTouched || !$('a-out').value || $('a-out').value<minOut) $('a-out').value=minOut;
+  addSummary();
+}
+['input','change'].forEach(ev=>$('a-in').addEventListener(ev,syncEnd));
+['a-out','a-site'].forEach(id=>['input','change'].forEach(ev=>$(id).addEventListener(ev,addSummary)));
+['a-in','a-out','a-site'].forEach(id=>$(id).addEventListener('change',()=>{ $('a-msg').textContent=''; }));
+
 $('add').addEventListener('submit',async e=>{
   e.preventDefault(); $('a-msg').textContent='';
-  const {ok,data}=await api('/api/admin/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    kind:document.querySelector('input[name=a-kind]:checked').value, site:$('a-site').value, checkIn:$('a-in').value, checkOut:$('a-out').value,
-    name:$('a-name').value, phone:$('a-phone').value, notes:$('a-notes').value})});
-  if(!ok){ $('a-msg').textContent=data.error||'Could not save.'; return; }
-  ['a-name','a-phone','a-notes'].forEach(id=>$(id).value=''); await load(); show('today');
+  const block=isBlock(), a=$('a-in').value, b=$('a-out').value;
+  if(!a||!b){ $('a-msg').textContent='Pick both dates.'; return; }
+  if(block ? b<a : b<=a){ $('a-msg').textContent = block ? 'The last day closed can\'t be before the first day.' : 'The leave date has to be after the arrive date.'; return; }
+  const checkOut = block ? addDays(b,1) : b;           // a block's last day is included, so the site reopens the day after
+  const sites = $('a-site').value==='all' ? [...Array(DATA.sites)].map((_,i)=>i+1) : [$('a-site').value];
+  const btn=$('a-save'); btn.disabled=true;
+  const done=[], failed=[], skipped=[];
+  for(const site of sites){
+    const {ok,data}=await api('/api/admin/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      kind:block?'block':'booking', site, checkIn:a, checkOut, name:$('a-name').value, phone:$('a-phone').value, notes:$('a-notes').value})});
+    if(ok) done.push(site);
+    else if(sites.length>1 && /already blocked/.test(data.error||'')) skipped.push(site);
+    else failed.push(data.error||`Site ${site} could not be saved.`);
+  }
+  btn.disabled=false;
+  if(failed.length) $('a-msg').textContent = (sites.length>1&&done.length?'Blocked the other sites. ':'')+failed.join(' ');
+  if(done.length){
+    toast(block ? `${sites.length>1?`${done.length} site${done.length>1?'s':''}`:'Site '+done[0]} blocked ${short(a)} through ${short(b)}${skipped.length?` (Site ${skipped.join(', ')} already blocked)`:''}` : `Booking saved for Site ${done[0]}`);
+    ['a-name','a-phone','a-notes'].forEach(id=>$(id).value=''); outTouched=false;
+    await load();
+    if(!failed.length) show(block?'calendar':'today');
+  }
 });
 
 /* payments */
