@@ -272,7 +272,7 @@ async function load(){
 }
 function render(){
   const {today,sites,bookings}=DATA;
-  if(!$('a-site').options.length) for(let s=1;s<=sites;s++) $('a-site').add(new Option('Site '+s,s));
+  if(!$('a-site').querySelector('option:not([value=all])')) for(let s=1;s<=sites;s++) $('a-site').add(new Option('Site '+s,s));
   if(!$('a-in').value){ $('a-in').value=today; $('a-out').value=addDays(today,1); addSummary(); }
   const occ=(b,d)=>b.check_in<=d && b.check_out>d;
   const live=bookings.filter(b=>b.status!=='cancelled');
@@ -367,7 +367,7 @@ $('add').addEventListener('submit',async e=>{
   if(!a||!b){ $('a-msg').textContent='Pick both dates.'; return; }
   if(block ? b<a : b<=a){ $('a-msg').textContent = block ? 'The last day closed can\'t be before the first day.' : 'The leave date has to be after the arrive date.'; return; }
   const checkOut = block ? addDays(b,1) : b;           // a block's last day is included, so the site reopens the day after
-  const sites = $('a-site').value==='all' ? [...Array(DATA.sites)].map((_,i)=>i+1) : [$('a-site').value];
+  const sites = $('a-site').value==='all' ? [...$('a-site').options].map(o=>o.value).filter(v=>v!=='all') : [$('a-site').value];
   const btn=$('a-save'); btn.disabled=true;
   const done=[], failed=[], skipped=[];
   for(const site of sites){
@@ -444,6 +444,12 @@ $('reqs').addEventListener('click',e=>{
   confirmTap(x,'Tap again',async()=>{ await api(`/api/admin/payment-requests/${x.dataset.cancelreq}/cancel`,{method:'POST'}); loadMoney(); });
 });
 
+// Fill the Site list right away from the park settings, so it works even before bookings load
+fetch('/api/config').then(r=>r.json()).then(c=>{
+  const sel=$('a-site'); if(sel.querySelector('option:not([value=all])')) return;
+  for(let i=1;i<=(c.sites||6);i++) sel.add(new Option('Site '+i,i));
+  if(!$('a-in').value && c.today){ $('a-in').value=c.today; $('a-out').value=addDays(c.today,1); addSummary(); }
+}).catch(()=>{ const sel=$('a-site'); if(!sel.options.length) for(let i=1;i<=6;i++) sel.add(new Option('Site '+i,i)); });
 load(); loadMoney();
 setInterval(()=>{ if(!document.hidden){ load(); loadMoney(); } },60000);
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ load(); loadMoney(); } });
