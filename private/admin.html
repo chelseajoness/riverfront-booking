@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Owner · Riverfront Retreat</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+:root{--bg:#F2F4EF;--surface:#fff;--ink:#16231E;--muted:#56635C;--line:#D5DBD3;--river:#1C6B66;--river-soft:#DCEBE8;--pine:#1E3A31;--amber:#B9781C;--amber-soft:#F4E6CF;--block:#C9CFC8;--danger:#B3402F}
+@media (prefers-color-scheme:dark){:root{--bg:#0F1714;--surface:#17221E;--ink:#E6ECE8;--muted:#9AA8A1;--line:#2A3832;--river:#4FB3AA;--river-soft:#183330;--amber:#E0A34A;--amber-soft:#3A2D18;--block:#33403A;--danger:#E57B69;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Work Sans",system-ui,sans-serif}
+header{background:var(--pine);color:#fff;padding:14px 20px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center}
+header b{font:700 1.15rem "Zilla Slab",Georgia,serif}
+header a{color:#CFE0D9}
+main{max-width:1100px;margin:0 auto;padding:24px 16px;display:grid;gap:28px}
+h2{font:700 1.4rem "Zilla Slab",Georgia,serif;margin:0 0 12px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px}
+.stat b{display:block;font:700 2rem "Zilla Slab",Georgia,serif;font-variant-numeric:tabular-nums}
+.stat span{color:var(--muted);font-size:.85rem}
+.gridwrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+table.grid{border-collapse:collapse;font-size:.8rem;min-width:100%}
+.grid th,.grid td{border:1px solid var(--line);padding:0;text-align:center;height:34px;min-width:38px}
+.grid th{font:500 .72rem "IBM Plex Mono",monospace;color:var(--muted);padding:4px}
+.grid th.today{color:var(--ink);background:var(--river-soft)}
+.grid td.s{font-weight:600;padding:0 10px;white-space:nowrap}
+.grid td.b{background:var(--river);color:#fff}
+.grid td.p{background:var(--amber-soft)}
+.grid td.x{background:var(--block)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:.85rem;color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.list{display:grid;gap:8px}
+.bk{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:grid;grid-template-columns:70px 1fr auto;gap:12px;align-items:center}
+.bk .site{font:700 1.3rem "Zilla Slab",Georgia,serif}
+.bk .who{display:grid;gap:2px;min-width:0}
+.bk .who small{color:var(--muted);overflow-wrap:anywhere}
+.pill{font:500 .7rem "IBM Plex Mono",monospace;text-transform:uppercase;letter-spacing:.06em;padding:2px 7px;border-radius:4px;background:var(--river-soft);color:var(--river);margin-left:6px}
+.pill.hold{background:var(--amber-soft);color:var(--amber)} .pill.block{background:var(--block);color:var(--ink)}
+.pill.alert{background:var(--danger);color:#fff}
+button,.btn{font:600 .9rem "Work Sans",sans-serif;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:8px 12px;cursor:pointer}
+button.primary{background:var(--river);color:#fff;border-color:var(--river)}
+form{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;align-items:end}
+label{display:grid;gap:4px;font-size:.85rem;font-weight:500;min-width:0}
+input,select{width:100%;min-width:0;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+.msg{grid-column:1/-1;font-size:.9rem;color:var(--danger)} .msg:empty{display:none}
+.empty{color:var(--muted);padding:12px 0}
+@media (max-width:560px){.bk{grid-template-columns:50px 1fr}.bk button{grid-column:2;justify-self:start}}
+</style>
+</head>
+<body>
+<header><b>Riverfront Retreat · Owner</b><a href="/">View website ↗</a></header>
+<main>
+  <section>
+    <div class="stats">
+      <div class="stat"><b id="st-tonight">–</b><span>sites filled tonight</span></div>
+      <div class="stat"><b id="st-arrive">–</b><span>arriving next 7 days</span></div>
+      <div class="stat"><b id="st-depart">–</b><span>leaving next 7 days</span></div>
+      <div class="stat"><b id="st-rev">–</b><span>paid online, upcoming stays</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Next 3 weeks</h2>
+    <div class="gridwrap"><table class="grid" id="grid"></table></div>
+    <div class="legend"><span><i style="background:var(--river)"></i>Booked</span><span><i style="background:var(--amber-soft)"></i>Guest paying now (30-min hold)</span><span><i style="background:var(--block)"></i>Blocked</span></div>
+  </section>
+
+  <section>
+    <h2>Add a phone booking or block a site</h2>
+    <form id="add">
+      <label>Type<select id="a-kind"><option value="booking">Phone / walk-in booking</option><option value="block">Block (maintenance, personal)</option></select></label>
+      <label>Site<select id="a-site"></select></label>
+      <label>Arrive<input type="date" id="a-in" required></label>
+      <label>Leave<input type="date" id="a-out" required></label>
+      <label>Guest name<input id="a-name" maxlength="100"></label>
+      <label>Phone<input id="a-phone" maxlength="30"></label>
+      <label>Notes<input id="a-notes" maxlength="300" placeholder="Paid cash, etc."></label>
+      <button class="primary" type="submit">Save</button>
+      <p class="msg" id="a-msg"></p>
+    </form>
+  </section>
+
+  <section>
+    <h2>Upcoming</h2>
+    <div class="list" id="list"></div>
+  </section>
+</main>
+<script>
+const $=id=>document.getElementById(id), DAY=86400000;
+const toD=s=>new Date(s+'T00:00:00Z'), iso=d=>d.toISOString().slice(0,10), addDays=(s,n)=>iso(new Date(toD(s).getTime()+n*DAY));
+const short=s=>toD(s).toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let DATA;
+
+async function load(){
+  const r=await fetch('/api/admin/bookings'); DATA=await r.json(); render();
+}
+function render(){
+  const {today,sites,bookings}=DATA;
+  if(!$('a-site').options.length) for(let s=1;s<=sites;s++) $('a-site').add(new Option('Site '+s,s));
+  if(!$('a-in').value){ $('a-in').value=today; $('a-out').value=addDays(today,1); }
+  const occ=(b,d)=>b.check_in<=d && b.check_out>d;
+  const live=bookings.filter(b=>b.status!=='cancelled');
+  $('st-tonight').textContent = new Set(live.filter(b=>b.status!=='blocked'&&occ(b,today)).map(b=>b.site)).size + ' / ' + sites;
+  const wk=addDays(today,7);
+  $('st-arrive').textContent = live.filter(b=>b.status==='confirmed'&&b.check_in>=today&&b.check_in<wk).length;
+  $('st-depart').textContent = live.filter(b=>b.status==='confirmed'&&b.check_out>=today&&b.check_out<wk).length;
+  $('st-rev').textContent = '$'+(live.filter(b=>b.status==='confirmed'&&b.check_out>today).reduce((a,b)=>a+b.amount_cents,0)/100).toLocaleString('en-US');
+
+  const days=[...Array(21)].map((_,i)=>addDays(today,i));
+  let h='<tr><th></th>'+days.map(d=>`<th class="${d===today?'today':''}">${toD(d).toLocaleDateString('en-US',{weekday:'narrow',timeZone:'UTC'})}<br>${toD(d).getUTCDate()}</th>`).join('')+'</tr>';
+  for(let s=1;s<=sites;s++){
+    h+=`<tr><td class="s">Site ${s}</td>`+days.map(d=>{
+      const b=live.find(b=>b.site===s&&occ(b,d));
+      if(!b) return '<td></td>';
+      const cls=b.status==='blocked'?'x':b.status==='pending'?'p':'b';
+      const t=b.status==='blocked'?'Blocked':(b.guest_name||'Guest');
+      return `<td class="${cls}" title="${esc(t)} · ${short(b.check_in)}–${short(b.check_out)}">${b.check_in===d||d===today?esc((t||'').split(' ')[0].slice(0,6)):''}</td>`;
+    }).join('')+'</tr>';
+  }
+  $('grid').innerHTML=h;
+
+  const up=live.filter(b=>b.check_out>=today);
+  $('list').innerHTML = up.length ? up.map(b=>{
+    const pill = b.status==='blocked'?'<span class="pill block">Blocked</span>':b.status==='pending'?'<span class="pill hold">Paying now</span>':(b.source==='owner'?'<span class="pill">Phone</span>':'<span class="pill">Paid online</span>');
+    const alert = (b.notes||'').startsWith('PAID BUT') ? '<span class="pill alert">Needs attention</span>' : '';
+    const RIG={ClassA:'Class A',ClassB:'Class B',ClassC:'Class C','5thWheel':'Fifth wheel',TravelTrailer:'Travel trailer',Other:'Other rig'};
+    const rig = b.rig_type ? `${esc(RIG[b.rig_type]||b.rig_type)} ${b.rig_length||''}ft · ${esc(b.power||'')}${b.pets?' · pets':''}` : '';
+    const contact=[b.guest_phone,b.guest_email].filter(Boolean).map(esc).join(' · ');
+    return `<div class="bk"><div class="site">#${b.site}</div>
+      <div class="who"><div><b>${esc(b.status==='blocked'?(b.notes||'Blocked'):(b.guest_name||'Guest'))}</b>${pill}${alert}</div>
+      <small>${short(b.check_in)} → ${short(b.check_out)} · ${esc(b.plan)}${b.amount_cents?` · $${(b.amount_cents/100).toLocaleString('en-US')} paid`:''}</small>
+      ${contact?`<small>${contact}</small>`:''}${rig?`<small>${rig}</small>`:''}${b.notes&&b.status!=='blocked'?`<small>${esc(b.notes)}</small>`:''}</div>
+      ${b.status==='pending'?'':`<button data-cancel="${b.id}" data-confirm="0">${b.status==='blocked'?'Remove block':'Cancel'}</button>`}</div>`;
+  }).join('') : '<p class="empty">No upcoming bookings yet.</p>';
+}
+
+$('list').addEventListener('click',async e=>{
+  const btn=e.target.closest('[data-cancel]'); if(!btn) return;
+  if(btn.dataset.confirm==='0'){ btn.dataset.confirm='1'; btn.textContent='Tap again to confirm'; setTimeout(()=>{ if(btn.isConnected){btn.dataset.confirm='0'; btn.textContent='Cancel';} },4000); return; }
+  await fetch(`/api/admin/bookings/${btn.dataset.cancel}/cancel`,{method:'POST'}); load();
+});
+
+$('add').addEventListener('submit',async e=>{
+  e.preventDefault(); $('a-msg').textContent='';
+  const r=await fetch('/api/admin/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    kind:$('a-kind').value, site:$('a-site').value, checkIn:$('a-in').value, checkOut:$('a-out').value,
+    name:$('a-name').value, phone:$('a-phone').value, notes:$('a-notes').value})});
+  const d=await r.json(); if(!r.ok){ $('a-msg').textContent=d.error; return; }
+  ['a-name','a-phone','a-notes'].forEach(id=>$(id).value=''); load();
+});
+
+load(); setInterval(load,60000);
+</script>
+</body>
+</html>

@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>Riverfront Retreat RV Park</title>
+<meta name="description" content="Riverfront RV park in New Augusta, Mississippi. Full hookups, big-rig and pet friendly, river access. Book nightly, weekly or monthly.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%231E3A31%22/%3E%3Cpath d=%22M4 20c4-3 8 3 12 0s8 3 12 0M4 25c4-3 8 3 12 0s8 3 12 0%22 stroke=%22%234FB3AA%22 stroke-width=%222%22 fill=%22none%22/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: a riverbank sign up top, then rates → hookups → booking desk → directions, one column that splits on wide screens */
+:root{
+  --bg:#F2F4EF; --surface:#FFFFFF; --ink:#16231E; --muted:#56635C; --line:#D5DBD3;
+  --river:#1C6B66; --river-ink:#FFFFFF; --river-soft:#DCEBE8; --pine:#1E3A31; --amber:#B9781C; --danger:#B3402F;
+  --display:"Zilla Slab",Rockwell,"Roboto Slab",Georgia,serif;
+  --body:"Work Sans","Segoe UI",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0F1714; --surface:#17221E; --ink:#E6ECE8; --muted:#9AA8A1; --line:#2A3832;
+  --river:#4FB3AA; --river-ink:#06201D; --river-soft:#183330; --pine:#0B1310; --amber:#E0A34A; --danger:#E57B69; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0F1714; --surface:#17221E; --ink:#E6ECE8; --muted:#9AA8A1; --line:#2A3832;
+  --river:#4FB3AA; --river-ink:#06201D; --river-soft:#183330; --pine:#0B1310; --amber:#E0A34A; --danger:#E57B69; color-scheme:dark}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.6}
+.wrap{max-width:1080px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1,h2,h3{font-family:var(--display);line-height:1.15;text-wrap:balance;margin:0}
+h2{font-size:clamp(1.7rem,3.5vw,2.3rem)}
+p{margin:0}
+a{color:var(--river)}
+:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+.eyebrow{font-family:var(--mono);font-size:.78rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+
+/* header */
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--pine)}
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--pine);color:#E9F0EC}
+.top .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-block:12px;flex-wrap:wrap}
+.brand{font-family:var(--display);font-weight:700;font-size:1.15rem;color:#fff;text-decoration:none}
+.top nav{display:flex;gap:18px;flex-wrap:wrap}
+.top nav a{color:#CFE0D9;text-decoration:none;font-size:.95rem}
+.top nav a:hover{color:#fff}
+.top nav a.cta{color:#fff;font-weight:600}
+
+/* hero */
+.hero{background:var(--pine);color:#EEF4F0;position:relative;overflow:hidden}
+.hero .wrap{padding-block:56px 72px;position:relative;z-index:1;display:grid;gap:22px}
+.hero .eyebrow{color:#9FC2B8}
+.hero h1{font-size:clamp(2.4rem,7vw,4.6rem);font-weight:700;color:#fff;max-width:14ch}
+.hero p.lede{font-size:1.15rem;max-width:52ch;color:#D3E2DB}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font-family:var(--mono);font-size:.82rem;padding:5px 10px;border:1px solid #4A6B60;border-radius:99px;color:#E2EEE8}
+.hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font:600 1rem var(--body);padding:13px 22px;border-radius:var(--r);border:0;cursor:pointer;text-decoration:none}
+.btn-primary{background:var(--amber);color:#1B1206}
+.btn-ghost{background:transparent;color:#fff;border:1px solid #6E8C82}
+.river-lines{position:absolute;inset:auto 0 0 0;height:120px;width:100%;opacity:.55}
+.river-lines path{fill:none;stroke:#3C8C82;stroke-width:1.5}
+
+section{padding-block:64px}
+.section-head{display:grid;gap:8px;margin-bottom:28px;max-width:60ch}
+.section-head p{color:var(--muted)}
+
+/* rates */
+.rates{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.rate{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:22px;display:grid;gap:6px;align-content:start}
+.rate .amt{font-family:var(--display);font-size:2.6rem;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1}
+.rate .amt small{font-family:var(--mono);font-size:.85rem;font-weight:500;color:var(--muted)}
+.rate p{color:var(--muted);font-size:.95rem}
+.rate.feature{border-color:var(--river);box-shadow:0 0 0 1px var(--river) inset}
+.tag{justify-self:start;font-family:var(--mono);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;background:var(--river-soft);color:var(--river);padding:3px 8px;border-radius:4px}
+
+/* hookups */
+.amen{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0;border-top:1px solid var(--line)}
+.amen div{padding:18px 4px;border-bottom:1px solid var(--line);display:grid;gap:2px}
+.amen strong{font-family:var(--display);font-size:1.25rem}
+.amen span{color:var(--muted);font-size:.95rem}
+
+/* booking */
+#book{background:var(--surface);border-block:1px solid var(--line)}
+.book-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:32px;align-items:start}
+form{display:grid;gap:22px}
+fieldset{border:0;padding:0;margin:0;display:grid;gap:12px;min-width:0}
+legend{font-family:var(--display);font-size:1.2rem;font-weight:700;margin-bottom:8px;padding:0}
+.seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg label{display:grid;gap:2px;padding:12px;border:1px solid var(--line);border-radius:var(--r);cursor:pointer;background:var(--bg)}
+.seg label b{font-weight:600}
+.seg label span{font-family:var(--mono);font-size:.8rem;color:var(--muted)}
+.seg input:checked+label{border-color:var(--river);background:var(--river-soft)}
+.seg input:focus-visible+label{outline:3px solid var(--amber);outline-offset:2px}
+.row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.field{display:grid;gap:5px;min-width:0}
+.field label{font-size:.88rem;font-weight:500}
+.field input,.field select{font:inherit;font-size:1rem;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);width:100%;min-width:0}
+.field input:focus,.field select:focus{border-color:var(--river);outline:none;box-shadow:0 0 0 3px var(--river-soft)}
+.field .hint{font-size:.8rem;color:var(--muted)}
+.field.bad input,.field.bad select{border-color:var(--danger)}
+.err{color:var(--danger);font-size:.82rem;min-height:0}
+.err:empty{display:none}
+
+.summary{position:sticky;top:calc(env(safe-area-inset-top,0px) + 76px);background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:22px;display:grid;gap:14px}
+.summary h3{font-size:1.3rem}
+.summary dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:.95rem}
+.summary dt{color:var(--muted)}
+.summary dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.total{display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--line);padding-top:12px}
+.total b{font-family:var(--display);font-size:2rem;font-variant-numeric:tabular-nums}
+.pay{width:100%;background:var(--river);color:var(--river-ink)}
+.pay:disabled{opacity:.55;cursor:not-allowed}
+.note{font-size:.85rem;color:var(--muted)}
+.notice{font-size:.9rem;background:var(--river-soft);border-radius:8px;padding:12px;color:var(--ink)}
+.lock{font-family:var(--mono);font-size:.75rem;color:var(--muted);text-align:center}
+
+/* contact */
+.contact{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}
+.contact div{display:grid;gap:6px;align-content:start;min-width:0}
+.contact .val{font-family:var(--display);font-size:1.3rem;font-weight:500;overflow-wrap:anywhere}
+.copy{justify-self:start;font:500 .82rem var(--body);background:none;border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:4px 10px;cursor:pointer}
+
+footer{background:var(--pine);color:#B9CCC4;font-size:.9rem}
+footer .wrap{padding-block:28px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+
+@media (max-width:820px){
+  .rates,.contact{grid-template-columns:1fr}
+  .book-grid{grid-template-columns:1fr}
+  .summary{position:static}
+  .top nav a:not(.cta){display:none}
+}
+@media (max-width:460px){
+  .seg{grid-template-columns:1fr}
+  .row{grid-template-columns:1fr}
+}
+</style>
+
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#top">Riverfront Retreat</a>
+    <nav aria-label="Main">
+      <a href="#rates">Rates</a>
+      <a href="#hookups">Hookups</a>
+      <a href="#directions">Directions</a>
+      <a class="cta" href="#book">Book a site →</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero" aria-labelledby="h1">
+    <div class="wrap">
+      <span class="eyebrow">RV Park · New Augusta, Mississippi</span>
+      <h1 id="h1">Riverfront Retreat RV Park</h1>
+      <p class="lede">Park on the river in Perry County. Full hookups, room for big rigs, and space for your dog to stretch out. Stay a night, a week, or the whole season.</p>
+      <div class="chips" aria-label="Highlights">
+        <span class="chip">30 / 50 amp</span><span class="chip">Water + sewer</span><span class="chip">Big rigs welcome</span><span class="chip">Pet friendly</span><span class="chip">River access</span>
+      </div>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#book">Check dates &amp; book</a>
+        <a class="btn btn-ghost" href="#rates">See rates</a>
+      </div>
+    </div>
+    <svg class="river-lines" viewBox="0 0 1200 120" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M0 40 C200 10 400 70 600 40 S1000 10 1200 40"/>
+      <path d="M0 62 C200 32 400 92 600 62 S1000 32 1200 62"/>
+      <path d="M0 84 C200 54 400 114 600 84 S1000 54 1200 84"/>
+      <path d="M0 106 C200 76 400 136 600 106 S1000 76 1200 106"/>
+    </svg>
+  </section>
+
+  <section id="rates" aria-labelledby="rates-h">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Rates</span>
+        <h2 id="rates-h">One site, three ways to stay</h2>
+        <p>Every site has full hookups. Longer stays cost less per night.</p>
+      </div>
+      <div class="rates">
+        <div class="rate">
+          <span class="eyebrow">Nightly</span>
+          <div class="amt">$45 <small>/ night</small></div>
+          <p>Passing through or a weekend on the river.</p>
+        </div>
+        <div class="rate feature">
+          <span class="tag">Saves $35</span>
+          <span class="eyebrow">Weekly</span>
+          <div class="amt">$280 <small>/ week</small></div>
+          <p>Works out to $40 a night.</p>
+        </div>
+        <div class="rate">
+          <span class="tag">Best value</span>
+          <span class="eyebrow">Monthly</span>
+          <div class="amt">$500 <small>/ month</small></div>
+          <p>About $16 a night for travel nurses, crews and snowbirds.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="hookups" aria-labelledby="hook-h" style="padding-top:0">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">At your site</span>
+        <h2 id="hook-h">Hookups &amp; amenities</h2>
+      </div>
+      <div class="amen">
+        <div><strong>30 &amp; 50 amp</strong><span>Power for any rig, from pop-ups to diesel pushers.</span></div>
+        <div><strong>Water &amp; sewer</strong><span>Full hookups, no dump-station runs.</span></div>
+        <div><strong>Big-rig friendly</strong><span>Room to get long coaches and fifth wheels in.</span></div>
+        <div><strong>Pets welcome</strong><span>Bring the dogs along.</span></div>
+        <div><strong>River access</strong><span>Walk down to the water to fish or unwind.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="book" aria-labelledby="book-h">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Reservations</span>
+        <h2 id="book-h">Book your stay</h2>
+        <p>Pick your dates, tell us about your rig, and pay securely by card. Your site number comes with your confirmation.</p>
+      </div>
+      <div class="book-grid">
+        <form id="bookForm" novalidate>
+          <fieldset>
+            <legend>Length of stay</legend>
+            <div class="seg" role="radiogroup">
+              <input type="radio" name="plan" id="plan-nightly" value="nightly" checked><label for="plan-nightly"><b>Nightly</b><span>$45 / night</span></label>
+              <input type="radio" name="plan" id="plan-weekly" value="weekly"><label for="plan-weekly"><b>Weekly</b><span>$280 / week</span></label>
+              <input type="radio" name="plan" id="plan-monthly" value="monthly"><label for="plan-monthly"><b>Monthly</b><span>$500 / month</span></label>
+            </div>
+            <div class="row">
+              <div class="field" id="f-in"><label for="checkin">Arrival</label><input type="date" id="checkin" required><span class="err" id="e-in"></span></div>
+              <div class="field" id="f-out"><label for="checkout">Departure</label><input type="date" id="checkout"><span class="err" id="e-out"></span></div>
+              <div class="field" id="f-qty" hidden><label for="qty" id="qtyLabel">Number of weeks</label>
+                <select id="qty"></select></div>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Your rig</legend>
+            <div class="row">
+              <div class="field"><label for="rig">Rig type</label>
+                <select id="rig">
+                  <option value="ClassA">Class A motorhome</option>
+                  <option value="ClassC">Class C motorhome</option>
+                  <option value="ClassB">Class B / camper van</option>
+                  <option value="5thWheel">Fifth wheel</option>
+                  <option value="TravelTrailer" selected>Travel trailer</option>
+                  <option value="Other">Other</option>
+                </select></div>
+              <div class="field" id="f-len"><label for="len">Length (feet)</label><input type="number" id="len" min="10" max="65" inputmode="numeric" placeholder="e.g. 34"><span class="err" id="e-len"></span></div>
+              <div class="field"><label for="amp">Power needed</label>
+                <select id="amp"><option value="30A">30 amp</option><option value="50A" selected>50 amp</option></select></div>
+              <div class="field"><label for="pets">Pets</label>
+                <select id="pets"><option value="nopets">No pets</option><option value="pets">Bringing pets</option></select></div>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Contact</legend>
+            <div class="row">
+              <div class="field" id="f-name"><label for="gname">Full name</label><input type="text" id="gname" autocomplete="name"><span class="err" id="e-name"></span></div>
+              <div class="field" id="f-phone"><label for="gphone">Phone</label><input type="tel" id="gphone" autocomplete="tel"><span class="err" id="e-phone"></span></div>
+            </div>
+            <div class="field" id="f-email"><label for="gemail">Email</label><input type="email" id="gemail" autocomplete="email"><span class="hint">Your receipt goes here.</span><span class="err" id="e-email"></span></div>
+          </fieldset>
+        </form>
+
+        <aside class="summary" aria-live="polite" aria-labelledby="sum-h">
+          <h3 id="sum-h">Your stay</h3>
+          <dl>
+            <dt>Rate</dt><dd id="s-rate">Nightly</dd>
+            <dt>Arrive</dt><dd id="s-in">—</dd>
+            <dt>Leave</dt><dd id="s-out">—</dd>
+            <dt>Length</dt><dd id="s-len">—</dd>
+            <dt>Open sites</dt><dd id="s-avail">—</dd>
+          </dl>
+          <div class="total"><span id="s-due-label">Due today</span><b id="s-total">$0</b></div>
+          <p class="note" id="s-note" hidden></p>
+          <p class="err" id="e-form" role="alert"></p>
+          <button class="btn pay" id="payBtn" type="submit" form="bookForm">Continue to secure payment</button>
+          <p class="notice" id="offline" hidden>Online payment is coming soon. To book now, call <b>(601) 408-1851</b> or <b>(601) 620-8833</b>.</p>
+          <p class="lock">Card payments processed by Stripe. Your site is held for 30 minutes while you pay.</p>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section id="directions" aria-labelledby="dir-h">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Find us</span>
+        <h2 id="dir-h">Directions &amp; contact</h2>
+        <p>In Perry County, southeast of Hattiesburg. Call ahead if you're bringing a big rig and want help with the approach.</p>
+      </div>
+      <div class="contact">
+        <div>
+          <span class="eyebrow">Address</span>
+          <span class="val">120 Old Hwy 24<br>New Augusta, MS 39462</span>
+          <a href="https://www.google.com/maps/search/?api=1&amp;query=120+Old+Hwy+24+New+Augusta+MS+39462" target="_blank" rel="noopener">Open in Google Maps ↗</a>
+        </div>
+        <div>
+          <span class="eyebrow">Call or text</span>
+          <span class="val" id="ph1">(601) 408-1851</span>
+          <button class="copy" type="button" data-copy="6014081851">Copy</button>
+          <span class="val" id="ph2">(601) 620-8833</span>
+          <button class="copy" type="button" data-copy="6016208833">Copy</button>
+        </div>
+        <div>
+          <span class="eyebrow">Email</span>
+          <span class="val">riverfrontretreatrvpark@gmail.com</span>
+          <button class="copy" type="button" data-copy="riverfrontretreatrvpark@gmail.com">Copy</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© <span id="yr"></span> Riverfront Retreat RV Park · New Augusta, MS</span>
+    <span>120 Old Hwy 24</span>
+  </div>
+</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+const DAY = 86400000;
+const money = n => '$' + n.toLocaleString('en-US');
+const toD = s => s ? new Date(s + 'T00:00:00Z') : null;
+const iso = d => d.toISOString().slice(0,10);
+const addDays = (s,n) => iso(new Date(toD(s).getTime()+n*DAY));
+const fmtD = s => s ? toD(s).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',timeZone:'UTC'}) : '—';
+const plan = () => document.querySelector('input[name=plan]:checked').value;
+let CFG = {rates:{nightly:45,weekly:280,monthly:500}, maxWeeks:8, maxMonths:12, today: iso(new Date()), paymentsOn:false};
+let seq = 0, lastQuote = null;
+
+$('yr').textContent = new Date().getFullYear();
+
+function fillQty(p){
+  const sel=$('qty'), prev=sel.value, max = p==='weekly'?CFG.maxWeeks:CFG.maxMonths, unit = p==='weekly'?'week':'month';
+  sel.innerHTML='';
+  for(let i=1;i<=max;i++){ const o=document.createElement('option'); o.value=i; o.textContent=i+' '+unit+(i>1?'s':''); sel.appendChild(o); }
+  if(prev && +prev<=max) sel.value=prev;
+  $('qtyLabel').textContent='Number of '+unit+'s';
+}
+
+function params(){
+  return {plan:plan(), checkIn:$('checkin').value, checkOut:$('checkout').value, count:$('qty').value||'1'};
+}
+
+async function refresh(){
+  const p = plan();
+  $('f-out').hidden = p!=='nightly'; $('f-qty').hidden = p==='nightly';
+  $('s-rate').textContent = {nightly:'Nightly · $'+CFG.rates.nightly, weekly:'Weekly · $'+CFG.rates.weekly, monthly:'Monthly · $'+CFG.rates.monthly}[p];
+  $('s-due-label').textContent = p==='monthly' ? 'First month, due today' : 'Due today';
+  $('e-form').textContent='';
+  const my = ++seq;
+  const q = new URLSearchParams(params());
+  let data;
+  try{ const r = await fetch('/api/availability?'+q); data = await r.json(); if(!r.ok) throw new Error(data.error||'error'); }
+  catch(e){ if(my!==seq) return; lastQuote=null;
+    $('s-in').textContent=fmtD($('checkin').value); $('s-out').textContent=p==='nightly'?fmtD($('checkout').value):'—';
+    $('s-len').textContent='—'; $('s-total').textContent='$0'; $('s-avail').textContent='—';
+    $('s-note').textContent=e.message; $('s-note').hidden=false; return; }
+  if(my!==seq) return;
+  lastQuote = data;
+  $('s-in').textContent=fmtD(data.checkIn); $('s-out').textContent=fmtD(data.checkOut);
+  $('s-len').textContent=data.label; $('s-total').textContent=money(data.chargeCents/100);
+  $('s-avail').textContent = data.available ? `${data.available} of ${data.total}` : 'Full';
+  let note = data.note || '';
+  if(!data.available) note = 'All sites are booked for these dates. Try other dates or call us.';
+  else if(p==='nightly' && data.qty>=7) note = (note?note+' ':'')+'Staying 7 nights or more? The weekly rate costs less.';
+  $('s-note').textContent=note; $('s-note').hidden=!note;
+  $('payBtn').disabled = !data.available || !CFG.paymentsOn;
+}
+
+function setErr(field,errId,msg){ $(errId).textContent=msg; $(field).classList.toggle('bad',!!msg); return !msg; }
+function validate(){
+  let ok=true; const p=plan();
+  ok = setErr('f-in','e-in', !$('checkin').value?'Pick your arrival date.':'') && ok;
+  if(p==='nightly') ok = setErr('f-out','e-out', !$('checkout').value?'Pick your departure date.':($('checkout').value<=$('checkin').value?'Departure must be after arrival.':'')) && ok;
+  const L=+$('len').value; ok = setErr('f-len','e-len', !L?'Enter your rig length.':(L<10||L>65?'Enter a length between 10 and 65 feet.':'')) && ok;
+  ok = setErr('f-name','e-name', $('gname').value.trim().length<2?'Enter your name.':'') && ok;
+  ok = setErr('f-phone','e-phone', $('gphone').value.replace(/\D/g,'').length<10?'Enter a 10-digit phone number.':'') && ok;
+  ok = setErr('f-email','e-email', /^\S+@\S+\.\S+$/.test($('gemail').value.trim())?'':'Enter a valid email for your receipt.') && ok;
+  return ok;
+}
+
+$('bookForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  if(!validate()){ const f=document.querySelector('.field.bad input, .field.bad select'); if(f) f.focus(); return; }
+  const btn=$('payBtn'); btn.disabled=true; btn.textContent='Holding your site…'; $('e-form').textContent='';
+  try{
+    const r = await fetch('/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      ...params(), name:$('gname').value, phone:$('gphone').value, email:$('gemail').value,
+      rigType:$('rig').value, rigLength:$('len').value, power:$('amp').value, pets:$('pets').value==='pets'})});
+    const data = await r.json();
+    if(!r.ok || !data.url) throw new Error(data.error || 'Something went wrong. Please try again.');
+    window.location.href = data.url;
+  }catch(err){
+    $('e-form').textContent = err.message; btn.textContent='Continue to secure payment'; btn.disabled=false; refresh();
+  }
+});
+
+document.querySelectorAll('input[name=plan]').forEach(r=>r.addEventListener('change',()=>{ if(plan()!=='nightly') fillQty(plan()); refresh(); }));
+['checkout','qty'].forEach(id=>$(id).addEventListener('change',refresh));
+$('checkin').addEventListener('change',()=>{ const v=$('checkin').value; if(v){ $('checkout').min=addDays(v,1); if(!$('checkout').value||$('checkout').value<=v) $('checkout').value=addDays(v,2); } refresh(); });
+
+document.querySelectorAll('.copy').forEach(b=>b.addEventListener('click',()=>{
+  const t=b.dataset.copy, done=()=>{ b.textContent='Copied'; setTimeout(()=>b.textContent='Copy',1500); };
+  try{ navigator.clipboard.writeText(t).then(done,()=>{ b.textContent=t; }); }catch(e){ b.textContent=t; }
+}));
+
+(async function init(){
+  try{ CFG = await (await fetch('/api/config')).json(); }catch(e){}
+  $('offline').hidden = CFG.paymentsOn; $('payBtn').hidden = !CFG.paymentsOn;
+  $('checkin').min = CFG.today; $('checkout').min = addDays(CFG.today,1);
+  if(!$('checkin').value){ $('checkin').value = addDays(CFG.today,7); $('checkout').value = addDays(CFG.today,9); }
+  refresh();
+})();
+</script>
+</body>
+</html>

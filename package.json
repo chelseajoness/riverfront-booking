@@ -1,0 +1,19 @@
+{
+  "name": "riverfront-retreat-booking",
+  "version": "1.0.0",
+  "description": "Booking website for Riverfront Retreat RV Park",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "express": "^4.21.2",
+    "pg": "^8.13.1",
+    "stripe": "^17.5.0"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  }
+}

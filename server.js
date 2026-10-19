@@ -1,0 +1,370 @@
+// Riverfront Retreat RV Park: booking server
+// Express + Postgres + Stripe Checkout. Runs on Railway (or anywhere with Node 20+).
+
+const path = require('path');
+const crypto = require('crypto');
+const express = require('express');
+const { Pool } = require('pg');
+const Stripe = require('stripe');
+
+// ---------- Settings (change these here) ----------
+const PARK = {
+  name: 'Riverfront Retreat RV Park',
+  sites: 6,                                   // sites 1–6, all back-in, 30/50 amp
+  rates: { nightly: 45, weekly: 280, monthly: 500 },  // dollars
+  maxNights: 31,                              // longest nightly booking
+  maxWeeks: 8,
+  maxMonths: 12,
+  maxBookAheadDays: 365,
+  holdMinutes: 30,                            // a site is held this long while the guest pays (Stripe minimum is 30)
+  timeZone: 'America/Chicago',
+};
+
+const {
+  DATABASE_URL,
+  STRIPE_SECRET_KEY,
+  STRIPE_WEBHOOK_SECRET,
+  ADMIN_PASSWORD,
+  PORT = 3000,
+} = process.env;
+const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
+
+if (!DATABASE_URL) { console.error('DATABASE_URL is not set'); process.exit(1); }
+if (!ADMIN_PASSWORD) console.warn('ADMIN_PASSWORD is not set: the owner page is locked until you set it.');
+if (!STRIPE_SECRET_KEY) console.warn('STRIPE_SECRET_KEY is not set: online payments are off.');
+
+const stripe = STRIPE_SECRET_KEY ? Stripe(STRIPE_SECRET_KEY) : null;
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: /localhost|127\.0\.0\.1|\.railway\.internal/.test(DATABASE_URL) ? false : { rejectUnauthorized: false },
+});
+
+// ---------- Database ----------
+async function migrate() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS bookings (
+      id            BIGSERIAL PRIMARY KEY,
+      site          INT  NOT NULL,
+      check_in      DATE NOT NULL,
+      check_out     DATE NOT NULL,
+      plan          TEXT NOT NULL,              -- nightly | weekly | monthly | block
+      status        TEXT NOT NULL,              -- pending | confirmed | cancelled | blocked
+      amount_cents  INT  NOT NULL DEFAULT 0,    -- charged online
+      guest_name    TEXT, guest_phone TEXT, guest_email TEXT,
+      rig_type      TEXT, rig_length INT, power TEXT, pets BOOLEAN,
+      notes         TEXT,
+      source        TEXT NOT NULL DEFAULT 'web', -- web | owner
+      hold_token    TEXT,
+      hold_expires  TIMESTAMPTZ,
+      stripe_session TEXT UNIQUE,
+      stripe_payment TEXT,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      CHECK (check_out > check_in)
+    );
+    CREATE INDEX IF NOT EXISTS bookings_dates ON bookings (check_in, check_out);
+  `);
+}
+
+// A booking occupies its site when it is confirmed, blocked, or a pending hold that hasn't expired.
+const ACTIVE = `(status IN ('confirmed','blocked') OR (status = 'pending' AND hold_expires > now()))`;
+
+async function freeSites(client, checkIn, checkOut) {
+  const { rows } = await client.query(
+    `SELECT DISTINCT site FROM bookings
+      WHERE ${ACTIVE} AND check_in < $2 AND check_out > $1`, [checkIn, checkOut]);
+  const taken = new Set(rows.map(r => r.site));
+  const free = [];
+  for (let s = 1; s <= PARK.sites; s++) if (!taken.has(s)) free.push(s);
+  return free;
+}
+
+// ---------- Dates & pricing ----------
+const DAY = 86400000;
+const isISO = s => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s + 'T00:00:00Z'));
+const toD = s => new Date(s + 'T00:00:00Z');
+const iso = d => d.toISOString().slice(0, 10);
+const addDays = (s, n) => iso(new Date(toD(s).getTime() + n * DAY));
+function addMonths(s, n) {
+  const d = toD(s); const day = d.getUTCDate();
+  d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() + n);
+  const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, last));
+  return iso(d);
+}
+function todayLocal() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: PARK.timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+const nightsBetween = (a, b) => Math.round((toD(b) - toD(a)) / DAY);
+const fmtDate = s => toD(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+
+// Works out the stay from what the guest picked. Throws a readable message on bad input.
+function quote({ plan, checkIn, checkOut, count }) {
+  if (!['nightly', 'weekly', 'monthly'].includes(plan)) throw new Error('Choose nightly, weekly or monthly.');
+  if (!isISO(checkIn)) throw new Error('Pick your arrival date.');
+  const today = todayLocal();
+  if (checkIn < today) throw new Error("Arrival can't be in the past.");
+  if (checkIn > addDays(today, PARK.maxBookAheadDays)) throw new Error('We take bookings up to a year ahead.');
+
+  let out, qty, label, chargeCents, note = '';
+  if (plan === 'nightly') {
+    if (!isISO(checkOut)) throw new Error('Pick your departure date.');
+    qty = nightsBetween(checkIn, checkOut);
+    if (qty < 1) throw new Error('Departure must be after arrival.');
+    if (qty > PARK.maxNights) throw new Error('For stays over a month, choose the monthly rate.');
+    out = checkOut; label = `${qty} night${qty > 1 ? 's' : ''}`;
+    chargeCents = qty * PARK.rates.nightly * 100;
+  } else if (plan === 'weekly') {
+    qty = parseInt(count, 10);
+    if (!(qty >= 1 && qty <= PARK.maxWeeks)) throw new Error(`Choose 1 to ${PARK.maxWeeks} weeks.`);
+    out = addDays(checkIn, qty * 7); label = `${qty} week${qty > 1 ? 's' : ''}`;
+    chargeCents = qty * PARK.rates.weekly * 100;
+  } else {
+    qty = parseInt(count, 10);
+    if (!(qty >= 1 && qty <= PARK.maxMonths)) throw new Error(`Choose 1 to ${PARK.maxMonths} months.`);
+    out = addMonths(checkIn, qty); label = `${qty} month${qty > 1 ? 's' : ''}`;
+    chargeCents = PARK.rates.monthly * 100;            // first month online
+    if (qty > 1) note = `First month paid today. Each month after is $${PARK.rates.monthly}, due at the start of the month.`;
+  }
+  return { plan, checkIn, checkOut: out, qty, label, chargeCents, note };
+}
+
+// ---------- Confirming payments (used by webhook and success page) ----------
+async function confirmFromSession(session) {
+  if (!session || session.payment_status !== 'paid') return null;
+  const id = session.metadata && session.metadata.booking_id;
+  if (!id) return null;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(42)');
+    const { rows: [b] } = await client.query('SELECT * FROM bookings WHERE id = $1 FOR UPDATE', [id]);
+    if (!b) { await client.query('ROLLBACK'); return null; }
+    if (b.status === 'confirmed') { await client.query('COMMIT'); return b; }
+
+    const phone = session.customer_details && session.customer_details.phone;
+    // If the hold expired before payment finished, re-check that the site is still free; move to another free site if not.
+    let site = b.site;
+    const { rows: clash } = await client.query(
+      `SELECT 1 FROM bookings WHERE id <> $1 AND site = $2 AND ${ACTIVE} AND check_in < $4 AND check_out > $3 LIMIT 1`,
+      [b.id, b.site, b.check_in, b.check_out]);
+    if (clash.length) {
+      const free = await freeSites(client, iso(b.check_in), iso(b.check_out));
+      site = free.length ? free[0] : null;
+    }
+    const notes = site == null ? 'PAID BUT NO SITE FREE: call guest / refund in Stripe' : b.notes;
+    const { rows: [updated] } = await client.query(
+      `UPDATE bookings SET status='confirmed', site=COALESCE($2, site), notes=$3,
+              stripe_payment=$4, guest_phone=COALESCE(guest_phone,$5), hold_expires=NULL, updated_at=now()
+        WHERE id=$1 RETURNING *`,
+      [b.id, site, notes, session.payment_intent || null, phone || null]);
+    await client.query('COMMIT');
+    return updated;
+  } catch (e) { await client.query('ROLLBACK'); throw e; }
+  finally { client.release(); }
+}
+
+// ---------- App ----------
+const app = express();
+app.set('trust proxy', 1);
+
+// Stripe webhook needs the raw body, so it goes before express.json().
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  if (!stripe || !STRIPE_WEBHOOK_SECRET) return res.status(503).send('Stripe not configured');
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, req.headers['stripe-signature'], STRIPE_WEBHOOK_SECRET);
+  } catch (e) {
+    return res.status(400).send(`Webhook signature check failed: ${e.message}`);
+  }
+  try {
+    const s = event.data.object;
+    if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+      await confirmFromSession(s);
+    } else if (event.type === 'checkout.session.expired') {
+      await pool.query(`UPDATE bookings SET status='cancelled', updated_at=now() WHERE stripe_session=$1 AND status='pending'`, [s.id]);
+    }
+    res.json({ received: true });
+  } catch (e) {
+    console.error('webhook error', e);
+    res.status(500).send('error');
+  }
+});
+
+app.use(express.json({ limit: '20kb' }));
+
+// Public: park settings for the website
+app.get('/api/config', (req, res) => {
+  res.json({ sites: PARK.sites, rates: PARK.rates, maxNights: PARK.maxNights, maxWeeks: PARK.maxWeeks,
+             maxMonths: PARK.maxMonths, today: todayLocal(), paymentsOn: !!stripe });
+});
+
+// Public: how many sites are open for a stay
+app.get('/api/availability', async (req, res) => {
+  try {
+    const q = quote({ plan: req.query.plan, checkIn: req.query.checkIn, checkOut: req.query.checkOut, count: req.query.count });
+    const free = await freeSites(pool, q.checkIn, q.checkOut);
+    res.json({ ...q, available: free.length, total: PARK.sites });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Public: start a booking → hold a site → send guest to Stripe Checkout
+const clean = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+app.post('/api/checkout', async (req, res) => {
+  if (!stripe) return res.status(503).json({ error: 'Online payment is not set up yet. Please call to book.' });
+  let q;
+  const b = req.body || {};
+  try { q = quote(b); } catch (e) { return res.status(400).json({ error: e.message }); }
+
+  const name = clean(b.name, 100), phone = clean(b.phone, 30), email = clean(b.email, 200);
+  const rigType = clean(b.rigType, 40), power = b.power === '30A' ? '30A' : '50A';
+  const rigLength = parseInt(b.rigLength, 10), pets = !!b.pets;
+  if (name.length < 2) return res.status(400).json({ error: 'Enter your name.' });
+  if (phone.replace(/\D/g, '').length < 10) return res.status(400).json({ error: 'Enter a 10-digit phone number.' });
+  if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email.' });
+  if (!(rigLength >= 10 && rigLength <= 65)) return res.status(400).json({ error: 'Enter a rig length between 10 and 65 feet.' });
+
+  const client = await pool.connect();
+  let booking;
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(42)');   // one booking at a time, so two guests can't grab the same site
+    const free = await freeSites(client, q.checkIn, q.checkOut);
+    if (!free.length) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Sorry, all sites are booked for those dates. Try different dates or call us.' }); }
+    const token = crypto.randomBytes(16).toString('hex');
+    const { rows: [row] } = await client.query(
+      `INSERT INTO bookings (site, check_in, check_out, plan, status, amount_cents, guest_name, guest_phone, guest_email,
+                             rig_type, rig_length, power, pets, notes, hold_token, hold_expires)
+       VALUES ($1,$2,$3,$4,'pending',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now() + ($15 || ' minutes')::interval)
+       RETURNING *`,
+      [free[0], q.checkIn, q.checkOut, q.plan, q.chargeCents, name, phone, email, rigType, rigLength, power, pets,
+       q.note || null, token, String(PARK.holdMinutes + 2)]);
+    await client.query('COMMIT');
+    booking = row;
+  } catch (e) {
+    await client.query('ROLLBACK'); client.release();
+    console.error(e); return res.status(500).json({ error: 'Something went wrong. Please try again or call us.' });
+  }
+  client.release();
+
+  try {
+    const planName = { nightly: 'Nightly', weekly: 'Weekly', monthly: 'Monthly' }[q.plan];
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      customer_email: email,
+      phone_number_collection: { enabled: true },
+      client_reference_id: String(booking.id),
+      metadata: { booking_id: String(booking.id), site: String(booking.site), check_in: q.checkIn, check_out: q.checkOut, plan: q.plan },
+      payment_intent_data: { description: `${PARK.name}: ${planName}, ${fmtDate(q.checkIn)} to ${fmtDate(q.checkOut)}`,
+                             metadata: { booking_id: String(booking.id) } },
+      line_items: [{
+        quantity: 1,
+        price_data: {
+          currency: 'usd',
+          unit_amount: q.chargeCents,
+          product_data: {
+            name: `RV site: ${planName}, ${q.label}`,
+            description: `${fmtDate(q.checkIn)} to ${fmtDate(q.checkOut)}${q.plan === 'monthly' && q.qty > 1 ? ' (first month)' : ''}`,
+          },
+        },
+      }],
+      expires_at: Math.floor(Date.now() / 1000) + PARK.holdMinutes * 60,
+      success_url: `${BASE_URL}/success.html?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${BASE_URL}/api/cancel-hold?b=${booking.id}&t=${booking.hold_token}`,
+    });
+    await pool.query('UPDATE bookings SET stripe_session=$2 WHERE id=$1', [booking.id, session.id]);
+    res.json({ url: session.url });
+  } catch (e) {
+    console.error('stripe error', e.message);
+    await pool.query(`UPDATE bookings SET status='cancelled' WHERE id=$1`, [booking.id]);
+    res.status(502).json({ error: 'Payment page could not be opened. Please try again or call us.' });
+  }
+});
+
+// Guest backed out of Stripe: release the hold right away
+app.get('/api/cancel-hold', async (req, res) => {
+  const id = parseInt(req.query.b, 10), t = String(req.query.t || '');
+  if (id && t) await pool.query(`UPDATE bookings SET status='cancelled', updated_at=now() WHERE id=$1 AND hold_token=$2 AND status='pending'`, [id, t]);
+  res.redirect('/#book');
+});
+
+// Success page asks for the booking (confirms directly with Stripe in case the webhook is slow)
+app.get('/api/booking-status', async (req, res) => {
+  const sid = String(req.query.session_id || '');
+  if (!stripe || !/^cs_[A-Za-z0-9_]+$/.test(sid)) return res.status(400).json({ error: 'Missing booking reference.' });
+  try {
+    let { rows: [b] } = await pool.query('SELECT * FROM bookings WHERE stripe_session=$1', [sid]);
+    if (!b) return res.status(404).json({ error: 'Booking not found.' });
+    if (b.status !== 'confirmed') {
+      const session = await stripe.checkout.sessions.retrieve(sid);
+      b = (await confirmFromSession(session)) || b;
+    }
+    const needsCall = (b.notes || '').startsWith('PAID BUT');
+    res.json({ status: b.status, site: needsCall ? null : b.site, checkIn: iso(b.check_in), checkOut: iso(b.check_out), plan: b.plan,
+               amount: b.amount_cents / 100, name: b.guest_name,
+               note: needsCall ? "Your payment went through. We'll call you shortly to confirm your site." : b.notes });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Could not look up the booking.' }); }
+});
+
+// ---------- Owner pages (password protected) ----------
+function requireOwner(req, res, next) {
+  const [type, val] = (req.headers.authorization || '').split(' ');
+  if (ADMIN_PASSWORD && type === 'Basic' && val) {
+    const pass = Buffer.from(val, 'base64').toString().split(':').slice(1).join(':');
+    const a = Buffer.from(pass), bb = Buffer.from(ADMIN_PASSWORD);
+    if (a.length === bb.length && crypto.timingSafeEqual(a, bb)) return next();
+  }
+  res.set('WWW-Authenticate', 'Basic realm="Riverfront Retreat owner"').status(401).send('Owner login required');
+}
+
+app.get('/admin', requireOwner, (req, res) => res.sendFile(path.join(__dirname, 'private', 'admin.html')));
+
+app.get('/api/admin/bookings', requireOwner, async (req, res) => {
+  const from = isISO(req.query.from) ? req.query.from : addDays(todayLocal(), -7);
+  const { rows } = await pool.query(
+    `SELECT *, (status='pending' AND hold_expires > now()) AS holding FROM bookings
+      WHERE check_out >= $1 AND (status IN ('confirmed','blocked') OR (status='pending' AND hold_expires > now()))
+      ORDER BY check_in, site`, [from]);
+  res.json({ today: todayLocal(), sites: PARK.sites, bookings: rows.map(r => ({ ...r, check_in: iso(r.check_in), check_out: iso(r.check_out) })) });
+});
+
+// Owner adds a phone/walk-in booking or blocks a site
+app.post('/api/admin/bookings', requireOwner, async (req, res) => {
+  const b = req.body || {};
+  const site = parseInt(b.site, 10);
+  if (!(site >= 1 && site <= PARK.sites)) return res.status(400).json({ error: `Site must be 1–${PARK.sites}.` });
+  if (!isISO(b.checkIn) || !isISO(b.checkOut) || b.checkOut <= b.checkIn) return res.status(400).json({ error: 'Check the dates.' });
+  const kind = b.kind === 'block' ? 'block' : 'booking';
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(42)');
+    const { rows: clash } = await client.query(
+      `SELECT id, guest_name FROM bookings WHERE site=$1 AND ${ACTIVE} AND check_in < $3 AND check_out > $2 LIMIT 1`,
+      [site, b.checkIn, b.checkOut]);
+    if (clash.length) { await client.query('ROLLBACK'); return res.status(409).json({ error: `Site ${site} is already taken for some of those dates.` }); }
+    const { rows: [row] } = await client.query(
+      `INSERT INTO bookings (site, check_in, check_out, plan, status, amount_cents, guest_name, guest_phone, notes, source)
+       VALUES ($1,$2,$3,$4,$5,0,$6,$7,$8,'owner') RETURNING id`,
+      [site, b.checkIn, b.checkOut, kind === 'block' ? 'block' : 'owner', kind === 'block' ? 'blocked' : 'confirmed',
+       clean(b.name, 100) || null, clean(b.phone, 30) || null, clean(b.notes, 300) || null]);
+    await client.query('COMMIT');
+    res.json({ id: row.id });
+  } catch (e) { await client.query('ROLLBACK'); console.error(e); res.status(500).json({ error: 'Could not save.' }); }
+  finally { client.release(); }
+});
+
+// Owner cancels a booking or removes a block (refunds are done in Stripe)
+app.post('/api/admin/bookings/:id/cancel', requireOwner, async (req, res) => {
+  const { rowCount } = await pool.query(`UPDATE bookings SET status='cancelled', updated_at=now() WHERE id=$1 AND status<>'cancelled'`, [req.params.id]);
+  res.json({ ok: rowCount === 1 });
+});
+
+app.get('/healthz', (req, res) => res.send('ok'));
+app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
+
+migrate()
+  .then(() => app.listen(PORT, () => console.log(`${PARK.name} booking server on ${BASE_URL}`)))
+  .catch(e => { console.error('Database setup failed', e); process.exit(1); });
+
+module.exports = { quote, addMonths };
