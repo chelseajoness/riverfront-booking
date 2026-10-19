@@ -26,6 +26,7 @@ const DATABASE_URL = env('DATABASE_URL');
 const STRIPE_SECRET_KEY = env('STRIPE_SECRET_KEY');
 const STRIPE_WEBHOOK_SECRET = env('STRIPE_WEBHOOK_SECRET');
 const ADMIN_PASSWORD = env('ADMIN_PASSWORD');
+const ADMIN_USERNAME = env('ADMIN_USERNAME') || env('ADMIN_USER');   // optional: when set, the owner login needs this username too
 const PORT = parseInt(env('PORT'), 10) || 3000;
 const BASE_URL = (env('BASE_URL') || `http://localhost:${PORT}`).replace(/\/$/, '');
 
@@ -348,9 +349,11 @@ app.get('/api/booking-status', async (req, res) => {
 function requireOwner(req, res, next) {
   const [type, val] = (req.headers.authorization || '').split(' ');
   if (ADMIN_PASSWORD && type === 'Basic' && val) {
-    const pass = Buffer.from(val, 'base64').toString().split(':').slice(1).join(':');
-    const a = Buffer.from(pass), bb = Buffer.from(ADMIN_PASSWORD);
-    if (a.length === bb.length && crypto.timingSafeEqual(a, bb)) return next();
+    const decoded = Buffer.from(val, 'base64').toString();
+    const user = decoded.split(':')[0], pass = decoded.split(':').slice(1).join(':');
+    const same = (x, y) => { const a = Buffer.from(x), b = Buffer.from(y); return a.length === b.length && crypto.timingSafeEqual(a, b); };
+    const userOk = !ADMIN_USERNAME || same(user.trim().toLowerCase(), ADMIN_USERNAME.toLowerCase());
+    if (same(pass, ADMIN_PASSWORD) && userOk) return next();
   }
   res.set('WWW-Authenticate', 'Basic realm="Riverfront Retreat owner"').status(401).send('Owner login required');
 }

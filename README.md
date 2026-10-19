@@ -27,7 +27,8 @@ Rates, number of sites and booking limits are at the top of `server.js` in `PARK
 | `BASE_URL` | `https://riverfrontretreatrvpark.com` |
 | `STRIPE_SECRET_KEY` | Stripe → Developers → API keys → Secret key |
 | `STRIPE_WEBHOOK_SECRET` | Stripe → Developers → Webhooks → your endpoint → Signing secret |
-| `ADMIN_PASSWORD` | Password for `/admin` (any username works) |
+| `ADMIN_USERNAME` | Username for `/admin` (not case-sensitive) |
+| `ADMIN_PASSWORD` | Password for `/admin` |
 
 ## Stripe webhook
 
