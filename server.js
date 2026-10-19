@@ -30,7 +30,11 @@ const ADMIN_USERNAME = env('ADMIN_USERNAME') || env('ADMIN_USER');   // optional
 const PORT = parseInt(env('PORT'), 10) || 3000;
 const BASE_URL = (env('BASE_URL') || `http://localhost:${PORT}`).replace(/\/$/, '');
 
-if (!DATABASE_URL) console.error('DATABASE_URL is not set: add it in Railway → Variables as ${{Postgres.DATABASE_URL}}');
+// Either DATABASE_URL, or Postgres's separate PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE variables
+const HAS_PG_PARTS = !!(env('PGHOST') && env('PGUSER') && env('PGPASSWORD'));
+const HAS_DB = !!DATABASE_URL || HAS_PG_PARTS;
+if (!HAS_DB) console.error('Database not set: add DATABASE_URL (or PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE) in Railway → Variables as references to Postgres');
+else console.log(DATABASE_URL ? 'Database: using DATABASE_URL' : `Database: using PGHOST (${env('PGHOST')})`);
 if (!ADMIN_PASSWORD) console.warn('ADMIN_PASSWORD is not set: the owner page is locked until you set it.');
 if (!STRIPE_SECRET_KEY) console.warn('STRIPE_SECRET_KEY is not set: online payments are off.');
 if (STRIPE_SECRET_KEY && !/^(sk|rk)_(live|test)_/.test(STRIPE_SECRET_KEY)) console.error('STRIPE_SECRET_KEY should start with sk_live_, sk_test_, rk_live_ or rk_test_');
@@ -40,11 +44,13 @@ process.on('unhandledRejection', e => console.error('Unhandled error:', e));
 process.on('uncaughtException', e => console.error('Uncaught error:', e));
 
 const stripe = STRIPE_SECRET_KEY ? Stripe(STRIPE_SECRET_KEY) : null;
-let useSSL = !/localhost|127\.0\.0\.1|\.railway\.internal|sslmode=disable/.test(DATABASE_URL);
+let useSSL = !/localhost|127\.0\.0\.1|\.railway\.internal|sslmode=disable/.test(DATABASE_URL || env('PGHOST'));
 let pool = null;
 let dbReady = false;
 function makePool() {
-  const p = new Pool({ connectionString: DATABASE_URL, ssl: useSSL ? { rejectUnauthorized: false } : false, max: 5 });
+  const conn = DATABASE_URL ? { connectionString: DATABASE_URL }
+    : { host: env('PGHOST'), port: parseInt(env('PGPORT'), 10) || 5432, user: env('PGUSER'), password: env('PGPASSWORD'), database: env('PGDATABASE') || env('PGUSER') };
+  const p = new Pool({ ...conn, ssl: useSSL ? { rejectUnauthorized: false } : false, max: 5 });
   p.on('error', e => console.error('Database connection error (will reconnect):', e.message));  // keeps one dropped connection from crashing the app
   return p;
 }
@@ -538,7 +544,7 @@ app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] })
 app.listen(PORT, '0.0.0.0', () => console.log(`${PARK.name} booking server listening on port ${PORT} (${BASE_URL})`));
 
 async function connectDb(attempt = 1) {
-  if (!DATABASE_URL) return;
+  if (!HAS_DB) return;
   try {
     if (!pool) pool = makePool();
     await migrate();
