@@ -29,6 +29,12 @@ Rates, number of sites and booking limits are at the top of `server.js` in `PARK
 | `STRIPE_WEBHOOK_SECRET` | Stripe → Developers → Webhooks → your endpoint → Signing secret |
 | `ADMIN_USERNAME` | Username for `/admin` (not case-sensitive) |
 | `ADMIN_PASSWORD` | Password for `/admin` |
+| `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE` | References to the Postgres service (used when `DATABASE_URL` is empty) |
+| `RESEND_API_KEY` | Optional. Turns on emails (guest confirmations with gate code, owner alerts). From resend.com |
+| `MAIL_FROM` | Optional. Sender, e.g. `Riverfront Retreat RV Park <bookings@riverfrontretreatrvpark.com>` (domain must be verified in Resend) |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | Optional. Turns on text alerts to the owners. From twilio.com |
+
+Gate code, Wi-Fi, check-in note and who gets alerts are set on the owner page under **Settings**.
 
 ## Stripe webhook
 

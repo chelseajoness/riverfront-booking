@@ -79,6 +79,10 @@ async function migrate() {
       CHECK (check_out > check_in)
     );
     CREATE INDEX IF NOT EXISTS bookings_dates ON bookings (check_in, check_out);
+    CREATE TABLE IF NOT EXISTS settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL DEFAULT ''
+    );
     CREATE TABLE IF NOT EXISTS payment_requests (
       id            BIGSERIAL PRIMARY KEY,
       token         TEXT NOT NULL UNIQUE,         -- the secret part of the pay link
@@ -189,6 +193,7 @@ async function confirmFromSession(session) {
         WHERE id=$1 RETURNING *`,
       [b.id, site, notes, session.payment_intent || null, phone || null]);
     await client.query('COMMIT');
+    notifyBooking(updated).catch(e => console.error('notify error', e.message));   // gate code email + owner alerts
     return updated;
   } catch (e) { await client.query('ROLLBACK'); throw e; }
   finally { client.release(); }
@@ -196,10 +201,99 @@ async function confirmFromSession(session) {
 
 async function markRequestPaid(session) {
   const { rows: [r] } = await pool.query(
-    `UPDATE payment_requests SET status='paid', paid_at=COALESCE(paid_at, now()), stripe_session=$2, stripe_payment=$3
-      WHERE id=$1 AND status<>'cancelled' RETURNING *`,
+    `UPDATE payment_requests SET status='paid', paid_at=now(), stripe_session=$2, stripe_payment=$3
+      WHERE id=$1 AND status='open' RETURNING *`,
     [session.metadata.payment_request_id, session.id, session.payment_intent || null]);
-  return r || null;
+  if (r) {   // newly paid: tell the owners
+    ownerAlert(`💵 Payment received: ${r.guest_name} paid ${money(r.amount_cents)} for ${r.description}.`,
+      `Payment received: ${r.guest_name}, ${money(r.amount_cents)}`).catch(e => console.error('notify error', e.message));
+    return r;
+  }
+  const { rows: [existing] } = await pool.query('SELECT * FROM payment_requests WHERE id=$1', [session.metadata.payment_request_id]);
+  return existing || null;
+}
+
+// ---------- Settings (gate code, Wi-Fi, who gets alerts) ----------
+const SETTING_KEYS = ['gate_code', 'wifi_name', 'wifi_password', 'checkin_note', 'alert_emails', 'alert_phones'];
+async function getSettings() {
+  const out = Object.fromEntries(SETTING_KEYS.map(k => [k, '']));
+  if (!pool) return out;
+  const { rows } = await pool.query('SELECT key, value FROM settings');
+  rows.forEach(r => { if (SETTING_KEYS.includes(r.key)) out[r.key] = r.value; });
+  return out;
+}
+const splitList = v => String(v || '').split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
+const toE164 = p => { const d = String(p).replace(/\D/g, ''); return d.length === 10 ? '+1' + d : d.length === 11 && d[0] === '1' ? '+' + d : null; };
+const escHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// ---------- Email (Resend) and text messages (Twilio): each turns on when its keys are set in Railway ----------
+const RESEND_API_KEY = env('RESEND_API_KEY');
+const MAIL_FROM = env('MAIL_FROM') || 'Riverfront Retreat RV Park <bookings@riverfrontretreatrvpark.com>';
+const MAIL_REPLY_TO = env('MAIL_REPLY_TO') || 'riverfrontretreatrvpark@gmail.com';
+const TWILIO_SID = env('TWILIO_ACCOUNT_SID'), TWILIO_TOKEN = env('TWILIO_AUTH_TOKEN'), TWILIO_FROM = env('TWILIO_FROM');
+
+async function sendEmail(to, subject, html) {
+  const list = Array.isArray(to) ? to : [to];
+  if (!RESEND_API_KEY || !list.length) return false;
+  const r = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: MAIL_FROM, to: list, reply_to: MAIL_REPLY_TO, subject, html }),
+  });
+  if (!r.ok) { console.error('email failed', r.status, (await r.text()).slice(0, 300)); return false; }
+  return true;
+}
+async function sendText(to, body) {
+  const num = toE164(to);
+  if (!TWILIO_SID || !TWILIO_TOKEN || !TWILIO_FROM || !num) return false;
+  const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+    method: 'POST',
+    headers: { Authorization: 'Basic ' + Buffer.from(`${TWILIO_SID}:${TWILIO_TOKEN}`).toString('base64'), 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ To: num, From: TWILIO_FROM, Body: body.slice(0, 1500) }),
+  });
+  if (!r.ok) { console.error('text failed', r.status, (await r.text()).slice(0, 300)); return false; }
+  return true;
+}
+// Alerts to the owners: a text to each alert phone (if texting is set up) and an email to each alert email
+async function ownerAlert(text, subject) {
+  const st = await getSettings();
+  const results = await Promise.all([
+    ...splitList(st.alert_phones).map(p => sendText(p, text)),
+    sendEmail(splitList(st.alert_emails), subject || text.slice(0, 80), `<p style="font:16px/1.5 sans-serif">${escHtml(text).replace(/\n/g, '<br>')}</p><p style="font:14px sans-serif"><a href="${BASE_URL}/admin">Open the owner page</a></p>`),
+  ]);
+  return results.some(Boolean);
+}
+
+function stayLines(b, st) {
+  const lines = [
+    ['Site', b.site], ['Arrive', fmtDate(iso(b.check_in))], ['Leave', fmtDate(iso(b.check_out))],
+    ['Gate code', st.gate_code || 'We will text it to you before you arrive'],
+  ];
+  if (st.wifi_name) lines.push(['Wi-Fi', st.wifi_name + (st.wifi_password ? ` · password ${st.wifi_password}` : '')]);
+  return lines;
+}
+async function notifyBooking(b) {
+  if (!b || b.status !== 'confirmed' || b.source !== 'web') return;
+  const st = await getSettings();
+  const needsCall = (b.notes || '').startsWith('PAID BUT');
+  const RIG = { ClassA: 'Class A', ClassB: 'Class B', ClassC: 'Class C', '5thWheel': 'Fifth wheel', TravelTrailer: 'Travel trailer', Other: 'Other rig' };
+  // 1) Owners: text + email
+  await ownerAlert(
+    `🏕️ New booking${needsCall ? ' (NEEDS A CALL: no site was free)' : ''}: ${b.guest_name}, Site ${b.site}, ${fmtDate(iso(b.check_in))} to ${fmtDate(iso(b.check_out))}, ${money(b.amount_cents)} paid.\nPhone: ${b.guest_phone || 'n/a'}\nRig: ${RIG[b.rig_type] || b.rig_type || ''} ${b.rig_length || ''}ft, ${b.power || ''}${b.pets ? ', pets' : ''}`,
+    `New booking: ${b.guest_name}, Site ${b.site}, ${fmtDate(iso(b.check_in))}`);
+  // 2) Guest: confirmation email with gate code and Wi-Fi
+  if (b.guest_email && !needsCall) {
+    const rows = stayLines(b, st).map(([k, v]) => `<tr><td style="padding:6px 16px 6px 0;color:#56635C">${k}</td><td style="padding:6px 0;font-weight:600">${escHtml(v)}</td></tr>`).join('');
+    await sendEmail(b.guest_email, `You're booked at Riverfront Retreat: Site ${b.site}, ${fmtDate(iso(b.check_in))}`,
+      `<div style="font:16px/1.5 -apple-system,Segoe UI,sans-serif;color:#16231E;max-width:520px">
+        <h2 style="font-family:Georgia,serif;margin:0 0 8px">See you on the river, ${escHtml((b.guest_name || '').split(' ')[0])}!</h2>
+        <p>Your RV site at Riverfront Retreat RV Park is confirmed.</p>
+        <table style="border-collapse:collapse;margin:12px 0">${rows}</table>
+        ${st.checkin_note ? `<p>${escHtml(st.checkin_note)}</p>` : ''}
+        <p><b>Address:</b> 120 Old Hwy 24, New Augusta, MS 39462<br><a href="https://www.google.com/maps/search/?api=1&query=120+Old+Hwy+24+New+Augusta+MS+39462">Get directions</a></p>
+        <p>Questions? Call or text (601) 408-1851 or (601) 620-8833, or reply to this email.</p>
+      </div>`);
+  }
 }
 
 // ---------- App ----------
@@ -345,7 +439,8 @@ app.get('/api/booking-status', async (req, res) => {
       b = (await confirmFromSession(session)) || b;
     }
     const needsCall = (b.notes || '').startsWith('PAID BUT');
-    res.json({ status: b.status, site: needsCall ? null : b.site, checkIn: iso(b.check_in), checkOut: iso(b.check_out), plan: b.plan,
+    const st = b.status === 'confirmed' && !needsCall ? await getSettings() : {};
+    res.json({ status: b.status, site: needsCall ? null : b.site, gateCode: st.gate_code || '', wifiName: st.wifi_name || '', wifiPassword: st.wifi_password || '', checkinNote: st.checkin_note || '', checkIn: iso(b.check_in), checkOut: iso(b.check_out), plan: b.plan,
                amount: b.amount_cents / 100, name: b.guest_name,
                note: needsCall ? "Your payment went through. We'll call you shortly to confirm your site." : b.notes });
   } catch (e) { console.error(e); res.status(500).json({ error: 'Could not look up the booking.' }); }
@@ -536,6 +631,34 @@ app.post('/api/pay/:token/checkout', async (req, res) => {
     console.error('stripe error', e.message);
     res.status(502).json({ error: 'The payment page could not be opened. Please try again or call us.' });
   }
+});
+
+// ---------- Owner settings ----------
+app.get('/api/admin/settings', requireOwner, async (req, res) => {
+  res.json({ settings: await getSettings(), emailOn: !!RESEND_API_KEY, textOn: !!(TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) });
+});
+app.put('/api/admin/settings', requireOwner, async (req, res) => {
+  const b = req.body || {};
+  for (const k of SETTING_KEYS) {
+    if (typeof b[k] !== 'string') continue;
+    await pool.query(`INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [k, b[k].trim().slice(0, 500)]);
+  }
+  res.json({ settings: await getSettings() });
+});
+app.post('/api/admin/test-alert', requireOwner, async (req, res) => {
+  const sent = await ownerAlert('✅ Test alert from your Riverfront Retreat booking site. New bookings will look like this.', 'Test alert from Riverfront Retreat');
+  res.json({ ok: sent });
+});
+// Send (or resend) the confirmation + gate code email to a guest
+app.post('/api/admin/bookings/:id/send-code', requireOwner, async (req, res) => {
+  const { rows: [b] } = await pool.query('SELECT * FROM bookings WHERE id=$1', [req.params.id]);
+  if (!b || !b.guest_email) return res.status(400).json({ error: 'This booking has no email address.' });
+  if (!RESEND_API_KEY) return res.status(503).json({ error: 'Email sending is not set up yet.' });
+  const st = await getSettings();
+  const rows = stayLines(b, st).map(([k, v]) => `<tr><td style="padding:6px 16px 6px 0;color:#56635C">${k}</td><td style="padding:6px 0;font-weight:600">${escHtml(v)}</td></tr>`).join('');
+  const ok = await sendEmail(b.guest_email, `Your gate code for Riverfront Retreat (Site ${b.site})`,
+    `<div style="font:16px/1.5 -apple-system,Segoe UI,sans-serif;color:#16231E;max-width:520px"><p>Hi ${escHtml((b.guest_name || '').split(' ')[0])}, here are your stay details:</p><table style="border-collapse:collapse;margin:12px 0">${rows}</table>${st.checkin_note ? `<p>${escHtml(st.checkin_note)}</p>` : ''}<p>120 Old Hwy 24, New Augusta, MS 39462 · (601) 408-1851</p></div>`);
+  res.status(ok ? 200 : 502).json(ok ? { ok: true } : { error: 'The email could not be sent.' });
 });
 
 app.get('/healthz', (req, res) => res.send(dbReady ? 'ok' : 'starting: database not connected yet'));

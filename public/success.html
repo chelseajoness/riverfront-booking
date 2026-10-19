@@ -19,6 +19,8 @@ dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0}
 dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
 .site{font:700 3rem/1 "Zilla Slab",Georgia,serif;color:var(--river)}
 p{margin:0} .muted{color:var(--muted)}
+  .gate{background:var(--bg);border:1px dashed var(--line);border-radius:10px;padding:12px 14px}
+.code{font:700 2rem/1.1 "IBM Plex Mono",monospace;letter-spacing:.15em}
 a.btn{justify-self:start;background:var(--river);color:#fff;padding:11px 18px;border-radius:10px;text-decoration:none;font-weight:600}
 </style>
 </head>
@@ -50,8 +52,11 @@ const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
         <dt>Leave</dt><dd>${fmt(b.checkOut)}</dd>
         <dt>Paid</dt><dd>$${b.amount.toLocaleString('en-US')}</dd>
       </dl>
+      ${b.gateCode?`<div class="gate"><span class="eyebrow">Gate code</span><div class="code">${esc(b.gateCode)}</div></div>`:''}
+      ${b.wifiName?`<p><b>Wi-Fi:</b> ${esc(b.wifiName)}${b.wifiPassword?` · password <b>${esc(b.wifiPassword)}</b>`:''}</p>`:''}
+      ${b.checkinNote?`<p class="muted">${esc(b.checkinNote)}</p>`:''}
       ${b.note?`<p class="muted">${esc(b.note)}</p>`:''}
-      <p class="muted">Your receipt is on its way by email. Questions? Call or text (601) 408-1851 or (601) 620-8833.</p>
+      <p class="muted">Your receipt and these details are on their way by email. Questions? Call or text (601) 408-1851 or (601) 620-8833.</p>
       <p class="muted">120 Old Hwy 24, New Augusta, MS 39462</p>
       <a class="btn" href="https://www.google.com/maps/search/?api=1&query=120+Old+Hwy+24+New+Augusta+MS+39462">Get directions</a>`;
   }catch(e){
