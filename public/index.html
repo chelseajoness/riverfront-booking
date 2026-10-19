@@ -5,7 +5,12 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
 <title>Riverfront Retreat RV Park</title>
-<meta name="description" content="Riverfront RV park in New Augusta, Mississippi. Full hookups, big-rig and pet friendly, river access. Book nightly, weekly or monthly.">
+<meta name="description" content="RV park on the Leaf River in New Augusta, Mississippi. Full hookups, big-rig and pet friendly, river access. Book nightly, weekly or monthly.">
+<meta property="og:title" content="Riverfront Retreat RV Park">
+<meta property="og:description" content="RV sites on the Leaf River in New Augusta, MS. Full hookups, 30/50 amp, big rigs and pets welcome. Book online.">
+<meta property="og:image" content="https://riverfrontretreatrvpark.com/img/leaf-river.jpg">
+<meta property="og:url" content="https://riverfrontretreatrvpark.com/">
+<meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%231E3A31%22/%3E%3Cpath d=%22M4 20c4-3 8 3 12 0s8 3 12 0M4 25c4-3 8 3 12 0s8 3 12 0%22 stroke=%22%234FB3AA%22 stroke-width=%222%22 fill=%22none%22/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -51,7 +56,12 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 
 /* hero */
 .hero{background:var(--pine);color:#EEF4F0;position:relative;overflow:hidden}
-.hero .wrap{padding-block:56px 72px;position:relative;z-index:1;display:grid;gap:22px}
+.hero .wrap{padding-block:56px 72px;position:relative;z-index:1;display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:40px;align-items:center}
+.hero-text{display:grid;gap:22px;min-width:0}
+.hero-photo{margin:0;display:grid;gap:8px;min-width:0}
+.hero-photo img{display:block;width:100%;aspect-ratio:3/4;max-height:560px;object-fit:cover;object-position:50% 60%;border-radius:12px;box-shadow:0 18px 40px rgba(0,0,0,.35)}
+.hero-photo figcaption{font-family:var(--mono);font-size:.78rem;letter-spacing:.06em;color:#9FC2B8}
+@media (max-width:820px){.hero .wrap{grid-template-columns:1fr}.hero-photo img{aspect-ratio:4/3;max-height:none}}
 .hero .eyebrow{color:#9FC2B8}
 .hero h1{font-size:clamp(2.4rem,7vw,4.6rem);font-weight:700;color:#fff;max-width:14ch}
 .hero p.lede{font-size:1.15rem;max-width:52ch;color:#D3E2DB}
@@ -157,16 +167,22 @@ footer .wrap{padding-block:28px;display:flex;justify-content:space-between;gap:1
 <main id="top">
   <section class="hero" aria-labelledby="h1">
     <div class="wrap">
-      <span class="eyebrow">RV Park · New Augusta, Mississippi</span>
+      <div class="hero-text">
+      <span class="eyebrow">RV Park on the Leaf River · New Augusta, MS</span>
       <h1 id="h1">Riverfront Retreat RV Park</h1>
-      <p class="lede">Park on the river in Perry County. Full hookups, room for big rigs, and space for your dog to stretch out. Stay a night, a week, or the whole season.</p>
+      <p class="lede">Park on the Leaf River in Perry County. Full hookups, room for big rigs, and space for your dog to stretch out. Stay a night, a week, or the whole season.</p>
       <div class="chips" aria-label="Highlights">
-        <span class="chip">30 / 50 amp</span><span class="chip">Water + sewer</span><span class="chip">Big rigs welcome</span><span class="chip">Pet friendly</span><span class="chip">River access</span>
+        <span class="chip">30 / 50 amp</span><span class="chip">Water + sewer</span><span class="chip">Big rigs welcome</span><span class="chip">Pet friendly</span><span class="chip">Leaf River access</span>
       </div>
       <div class="hero-actions">
         <a class="btn btn-primary" href="#book">Check dates &amp; book</a>
         <a class="btn btn-ghost" href="#rates">See rates</a>
       </div>
+      </div>
+      <figure class="hero-photo">
+        <img src="/img/leaf-river.jpg" srcset="/img/leaf-river.jpg 1000w, /img/leaf-river-2000.jpg 2000w" sizes="(max-width:820px) 100vw, 440px" width="1000" height="1333" alt="The Leaf River curving past a white sandbar, with pines on the bank at Riverfront Retreat">
+        <figcaption>The Leaf River at Riverfront Retreat</figcaption>
+      </figure>
     </div>
     <svg class="river-lines" viewBox="0 0 1200 120" preserveAspectRatio="none" aria-hidden="true">
       <path d="M0 40 C200 10 400 70 600 40 S1000 10 1200 40"/>
@@ -216,7 +232,7 @@ footer .wrap{padding-block:28px;display:flex;justify-content:space-between;gap:1
         <div><strong>Water &amp; sewer</strong><span>Full hookups, no dump-station runs.</span></div>
         <div><strong>Big-rig friendly</strong><span>Room to get long coaches and fifth wheels in.</span></div>
         <div><strong>Pets welcome</strong><span>Bring the dogs along.</span></div>
-        <div><strong>River access</strong><span>Walk down to the water to fish or unwind.</span></div>
+        <div><strong>Leaf River access</strong><span>Walk down to the river and its sandbars to fish or unwind.</span></div>
       </div>
     </div>
   </section>
