@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#1E3A31">
+<title>Owner login · Riverfront Retreat</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+:root{--pine:#1E3A31;--pine-2:#16302A;--surface:#fff;--ink:#16231E;--muted:#56635C;--line:#D5DBD3;--field:#F2F4EF;--river:#1C6B66;--amber:#B9781C;--danger:#B3402F}
+@media (prefers-color-scheme:dark){:root{--surface:#17221E;--ink:#E6ECE8;--muted:#9AA8A1;--line:#2A3832;--field:#0F1714;--river:#4FB3AA;--danger:#E57B69;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--pine);color:var(--ink);font:16px/1.5 "Work Sans",system-ui,sans-serif;
+  display:grid;place-items:center;padding:max(20px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(20px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+.shell{width:100%;max-width:880px;display:grid;grid-template-columns:1fr 1fr;background:var(--surface);border-radius:16px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.35)}
+.photo{position:relative;min-height:520px;background:url(/img/leaf-river.jpg) center 60%/cover}
+.photo::after{content:"";position:absolute;inset:0;background:linear-gradient(to top,rgba(14,32,27,.85),rgba(14,32,27,0) 55%)}
+.photo p{position:absolute;left:24px;right:24px;bottom:22px;margin:0;color:#fff;z-index:1;font:700 1.6rem/1.15 "Zilla Slab",Georgia,serif}
+.photo small{display:block;font:500 .75rem "IBM Plex Mono",monospace;letter-spacing:.12em;text-transform:uppercase;color:#BFD7CF;margin-bottom:6px}
+form{padding:40px 36px;display:grid;gap:18px;align-content:center}
+.eyebrow{font:500 .75rem "IBM Plex Mono",monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+h1{margin:0;font:700 2rem/1.1 "Zilla Slab",Georgia,serif}
+label{display:grid;gap:6px;font-weight:500;font-size:.95rem}
+input{font:inherit;font-size:16px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--field);color:var(--ink);width:100%}
+input:focus{outline:none;border-color:var(--river);box-shadow:0 0 0 3px color-mix(in srgb,var(--river) 25%,transparent)}
+.pw{position:relative}
+.pw input{padding-right:70px}
+.pw button{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:0;color:var(--river);font:600 .85rem "Work Sans",sans-serif;padding:8px 10px;cursor:pointer}
+.go{font:600 1.05rem "Work Sans",sans-serif;background:var(--river);color:#fff;border:0;border-radius:10px;padding:15px;cursor:pointer}
+@media (prefers-color-scheme:dark){.go{color:#06201D}}
+.go:disabled{opacity:.6}
+.err{color:var(--danger);font-size:.92rem;margin:0;min-height:1.4em}
+.back{font-size:.9rem;color:var(--muted)} .back a{color:var(--river)}
+:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+@media (max-width:720px){
+  body{place-items:start center}
+  .shell{grid-template-columns:1fr;border-radius:14px}
+  .photo{min-height:200px}
+  .photo p{font-size:1.3rem;bottom:16px;left:18px}
+  form{padding:26px 20px 28px}
+  h1{font-size:1.7rem}
+}
+</style>
+</head>
+<body>
+<main class="shell">
+  <div class="photo" role="img" aria-label="The Leaf River at Riverfront Retreat"><p><small>Riverfront Retreat</small>On the Leaf River</p></div>
+  <form id="f" novalidate>
+    <span class="eyebrow">Owner</span>
+    <h1>Log in</h1>
+    <label for="u">Username<input id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+    <label for="p">Password<span class="pw"><input id="p" name="password" type="password" autocomplete="current-password" required><button type="button" id="show" aria-controls="p">Show</button></span></label>
+    <p class="err" id="err" role="alert"></p>
+    <button class="go" id="go" type="submit">Log in</button>
+    <p class="back"><a href="/">← Back to the website</a></p>
+  </form>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+$('show').onclick=()=>{ const t=$('p').type==='password'; $('p').type=t?'text':'password'; $('show').textContent=t?'Hide':'Show'; };
+$('f').addEventListener('submit',async e=>{
+  e.preventDefault(); $('err').textContent='';
+  if(!$('u').value.trim()||!$('p').value){ $('err').textContent='Enter your username and password.'; return; }
+  $('go').disabled=true; $('go').textContent='Logging in…';
+  try{
+    const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('u').value,password:$('p').value})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||'Could not log in. Try again.');
+    location.href='/admin';
+  }catch(err){ $('err').textContent=err.message; $('go').disabled=false; $('go').textContent='Log in'; $('p').select(); }
+});
+$('u').focus();
+</script>
+</body>
+</html>

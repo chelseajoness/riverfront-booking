@@ -228,7 +228,7 @@ app.use(express.json({ limit: '20kb' }));
 
 // Until the database connects, booking routes answer with a clear message instead of crashing.
 app.use('/api', (req, res, next) => {
-  if (dbReady || req.path === '/config') return next();
+  if (dbReady || ['/config', '/login', '/logout'].includes(req.path)) return next();
   res.status(503).json({ error: 'Booking is starting up. Please try again in a minute or call us.' });
 });
 
@@ -345,18 +345,57 @@ app.get('/api/booking-status', async (req, res) => {
   } catch (e) { console.error(e); res.status(500).json({ error: 'Could not look up the booking.' }); }
 });
 
-// ---------- Owner pages (password protected) ----------
-function requireOwner(req, res, next) {
-  const [type, val] = (req.headers.authorization || '').split(' ');
-  if (ADMIN_PASSWORD && type === 'Basic' && val) {
-    const decoded = Buffer.from(val, 'base64').toString();
-    const user = decoded.split(':')[0], pass = decoded.split(':').slice(1).join(':');
-    const same = (x, y) => { const a = Buffer.from(x), b = Buffer.from(y); return a.length === b.length && crypto.timingSafeEqual(a, b); };
-    const userOk = !ADMIN_USERNAME || same(user.trim().toLowerCase(), ADMIN_USERNAME.toLowerCase());
-    if (same(pass, ADMIN_PASSWORD) && userOk) return next();
-  }
-  res.set('WWW-Authenticate', 'Basic realm="Riverfront Retreat owner"').status(401).send('Owner login required');
+// ---------- Owner login (login page + signed cookie, stays signed in for 30 days) ----------
+const SESSION_DAYS = 30;
+const COOKIE = 'rr_owner';
+// The signing key comes from the owner's username + password, so changing the password signs everyone out.
+const sessionKey = () => crypto.createHash('sha256').update(`rr|${ADMIN_USERNAME.toLowerCase()}|${ADMIN_PASSWORD}|${env('SESSION_SECRET')}`).digest();
+const signSession = exp => `${exp}.${crypto.createHmac('sha256', sessionKey()).update(String(exp)).digest('base64url')}`;
+const same = (x, y) => { const a = Buffer.from(String(x)), b = Buffer.from(String(y)); return a.length === b.length && crypto.timingSafeEqual(a, b); };
+function readCookie(req, name) {
+  const m = (req.headers.cookie || '').split(/;\s*/).find(c => c.startsWith(name + '='));
+  return m ? decodeURIComponent(m.slice(name.length + 1)) : '';
 }
+function isOwner(req) {
+  if (!ADMIN_PASSWORD) return false;
+  const v = readCookie(req, COOKIE); const exp = parseInt(v.split('.')[0], 10);
+  return !!exp && exp > Date.now() && same(v, signSession(exp));
+}
+function requireOwner(req, res, next) {
+  if (isOwner(req)) return next();
+  if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Please log in again.', login: true });
+  res.redirect('/login');
+}
+const cookieAttrs = req => `Path=/; HttpOnly; SameSite=Lax${req.secure ? '; Secure' : ''}`;
+
+// Slow down password guessing: 8 tries per 15 minutes per address
+const tries = new Map();
+function tooManyTries(ip) {
+  const now = Date.now(), t = (tries.get(ip) || []).filter(x => now - x < 15 * 60000);
+  tries.set(ip, t); return t.length >= 8;
+}
+
+app.get('/login', (req, res) => isOwner(req) ? res.redirect('/admin') : res.sendFile(path.join(__dirname, 'private', 'login.html')));
+
+app.post('/api/login', (req, res) => {
+  if (!ADMIN_PASSWORD) return res.status(503).json({ error: 'The owner password isn\'t set up yet. Add ADMIN_PASSWORD in Railway.' });
+  if (tooManyTries(req.ip)) return res.status(429).json({ error: 'Too many tries. Wait 15 minutes and try again.' });
+  const { username = '', password = '' } = req.body || {};
+  const userOk = !ADMIN_USERNAME || same(String(username).trim().toLowerCase(), ADMIN_USERNAME.toLowerCase());
+  if (!(userOk && same(password, ADMIN_PASSWORD))) {
+    tries.get(req.ip).push(Date.now());
+    return res.status(401).json({ error: 'That username or password isn\'t right.' });
+  }
+  tries.delete(req.ip);
+  const exp = Date.now() + SESSION_DAYS * 86400000;
+  res.set('Set-Cookie', `${COOKIE}=${encodeURIComponent(signSession(exp))}; Max-Age=${SESSION_DAYS * 86400}; ${cookieAttrs(req)}`);
+  res.json({ ok: true });
+});
+
+app.post('/api/logout', (req, res) => {
+  res.set('Set-Cookie', `${COOKIE}=; Max-Age=0; ${cookieAttrs(req)}`);
+  res.json({ ok: true });
+});
 
 app.get('/admin', requireOwner, (req, res) => res.sendFile(path.join(__dirname, 'private', 'admin.html')));
 

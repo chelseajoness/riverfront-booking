@@ -59,9 +59,9 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .hero .wrap{padding-block:56px 72px;position:relative;z-index:1;display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:40px;align-items:center}
 .hero-text{display:grid;gap:22px;min-width:0}
 .hero-photo{margin:0;display:grid;gap:8px;min-width:0}
-.hero-photo img{display:block;width:100%;aspect-ratio:3/4;max-height:560px;object-fit:cover;object-position:50% 60%;border-radius:12px;box-shadow:0 18px 40px rgba(0,0,0,.35)}
+.hero-photo img{display:block;width:100%;height:auto;aspect-ratio:3/4;max-height:560px;object-fit:cover;object-position:50% 60%;border-radius:12px;box-shadow:0 18px 40px rgba(0,0,0,.35)}
 .hero-photo figcaption{font-family:var(--mono);font-size:.78rem;letter-spacing:.06em;color:#9FC2B8}
-@media (max-width:820px){.hero .wrap{grid-template-columns:1fr}.hero-photo img{aspect-ratio:4/3;max-height:none}}
+@media (max-width:820px){.hero .wrap{grid-template-columns:1fr;padding-block:28px 64px;gap:28px}.hero-photo img{aspect-ratio:4/3;max-height:none}}
 .hero .eyebrow{color:#9FC2B8}
 .hero h1{font-size:clamp(2.4rem,7vw,4.6rem);font-weight:700;color:#fff;max-width:14ch}
 .hero p.lede{font-size:1.15rem;max-width:52ch;color:#D3E2DB}
@@ -344,7 +344,7 @@ footer .wrap{padding-block:28px;display:flex;justify-content:space-between;gap:1
 <footer>
   <div class="wrap">
     <span>© <span id="yr"></span> Riverfront Retreat RV Park · New Augusta, MS</span>
-    <span>120 Old Hwy 24 · <a href="/admin" style="color:inherit">Owner login</a></span>
+    <span>120 Old Hwy 24 · <a href="/login" style="color:inherit">Owner login</a></span>
   </div>
 </footer>
 
