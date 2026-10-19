@@ -20,24 +20,33 @@ const PARK = {
   timeZone: 'America/Chicago',
 };
 
-const {
-  DATABASE_URL,
-  STRIPE_SECRET_KEY,
-  STRIPE_WEBHOOK_SECRET,
-  ADMIN_PASSWORD,
-  PORT = 3000,
-} = process.env;
-const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
+// Railway variables sometimes get pasted with spaces or quotes around them; strip those.
+const env = k => (process.env[k] || '').trim().replace(/^["']|["']$/g, '');
+const DATABASE_URL = env('DATABASE_URL');
+const STRIPE_SECRET_KEY = env('STRIPE_SECRET_KEY');
+const STRIPE_WEBHOOK_SECRET = env('STRIPE_WEBHOOK_SECRET');
+const ADMIN_PASSWORD = env('ADMIN_PASSWORD');
+const PORT = parseInt(env('PORT'), 10) || 3000;
+const BASE_URL = (env('BASE_URL') || `http://localhost:${PORT}`).replace(/\/$/, '');
 
-if (!DATABASE_URL) { console.error('DATABASE_URL is not set'); process.exit(1); }
+if (!DATABASE_URL) console.error('DATABASE_URL is not set: add it in Railway → Variables as ${{Postgres.DATABASE_URL}}');
 if (!ADMIN_PASSWORD) console.warn('ADMIN_PASSWORD is not set: the owner page is locked until you set it.');
 if (!STRIPE_SECRET_KEY) console.warn('STRIPE_SECRET_KEY is not set: online payments are off.');
+if (STRIPE_SECRET_KEY && !/^(sk|rk)_(live|test)_/.test(STRIPE_SECRET_KEY)) console.error('STRIPE_SECRET_KEY should start with sk_live_, sk_test_, rk_live_ or rk_test_');
+if (STRIPE_SECRET_KEY && !STRIPE_WEBHOOK_SECRET) console.warn('STRIPE_WEBHOOK_SECRET is not set: bookings confirm from the success page only.');
+
+process.on('unhandledRejection', e => console.error('Unhandled error:', e));
+process.on('uncaughtException', e => console.error('Uncaught error:', e));
 
 const stripe = STRIPE_SECRET_KEY ? Stripe(STRIPE_SECRET_KEY) : null;
-const pool = new Pool({
-  connectionString: DATABASE_URL,
-  ssl: /localhost|127\.0\.0\.1|\.railway\.internal/.test(DATABASE_URL) ? false : { rejectUnauthorized: false },
-});
+let useSSL = !/localhost|127\.0\.0\.1|\.railway\.internal|sslmode=disable/.test(DATABASE_URL);
+let pool = null;
+let dbReady = false;
+function makePool() {
+  const p = new Pool({ connectionString: DATABASE_URL, ssl: useSSL ? { rejectUnauthorized: false } : false, max: 5 });
+  p.on('error', e => console.error('Database connection error (will reconnect):', e.message));  // keeps one dropped connection from crashing the app
+  return p;
+}
 
 // ---------- Database ----------
 async function migrate() {
@@ -171,6 +180,7 @@ app.set('trust proxy', 1);
 // Stripe webhook needs the raw body, so it goes before express.json().
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   if (!stripe || !STRIPE_WEBHOOK_SECRET) return res.status(503).send('Stripe not configured');
+  if (!dbReady) return res.status(503).send('Database not ready');
   let event;
   try {
     event = stripe.webhooks.constructEvent(req.body, req.headers['stripe-signature'], STRIPE_WEBHOOK_SECRET);
@@ -192,6 +202,12 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
 });
 
 app.use(express.json({ limit: '20kb' }));
+
+// Until the database connects, booking routes answer with a clear message instead of crashing.
+app.use('/api', (req, res, next) => {
+  if (dbReady || req.path === '/config') return next();
+  res.status(503).json({ error: 'Booking is starting up. Please try again in a minute or call us.' });
+});
 
 // Public: park settings for the website
 app.get('/api/config', (req, res) => {
@@ -360,11 +376,28 @@ app.post('/api/admin/bookings/:id/cancel', requireOwner, async (req, res) => {
   res.json({ ok: rowCount === 1 });
 });
 
-app.get('/healthz', (req, res) => res.send('ok'));
+app.get('/healthz', (req, res) => res.send(dbReady ? 'ok' : 'starting: database not connected yet'));
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
 
-migrate()
-  .then(() => app.listen(PORT, () => console.log(`${PARK.name} booking server on ${BASE_URL}`)))
-  .catch(e => { console.error('Database setup failed', e); process.exit(1); });
+app.listen(PORT, '0.0.0.0', () => console.log(`${PARK.name} booking server listening on port ${PORT} (${BASE_URL})`));
+
+async function connectDb(attempt = 1) {
+  if (!DATABASE_URL) return;
+  try {
+    if (!pool) pool = makePool();
+    await migrate();
+    dbReady = true;
+    console.log('Database ready');
+  } catch (e) {
+    console.error(`Database not reachable (attempt ${attempt}): ${e.message}`);
+    if (/SSL|ssl/.test(e.message)) {           // wrong SSL setting for this database: flip it and retry
+      useSSL = !useSSL; console.log(`Retrying with SSL ${useSSL ? 'on' : 'off'}`);
+    }
+    try { if (pool) await pool.end(); } catch (_) {}
+    pool = null;
+    setTimeout(() => connectDb(attempt + 1), Math.min(30000, 2000 * attempt));
+  }
+}
+connectDb();
 
 module.exports = { quote, addMonths };
