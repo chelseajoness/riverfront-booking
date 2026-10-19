@@ -72,6 +72,19 @@ async function migrate() {
       CHECK (check_out > check_in)
     );
     CREATE INDEX IF NOT EXISTS bookings_dates ON bookings (check_in, check_out);
+    CREATE TABLE IF NOT EXISTS payment_requests (
+      id            BIGSERIAL PRIMARY KEY,
+      token         TEXT NOT NULL UNIQUE,         -- the secret part of the pay link
+      booking_id    BIGINT REFERENCES bookings(id),
+      guest_name    TEXT NOT NULL,
+      guest_email   TEXT, guest_phone TEXT,
+      description   TEXT NOT NULL,                -- e.g. "October rent, Site 3"
+      amount_cents  INT  NOT NULL CHECK (amount_cents > 0),
+      status        TEXT NOT NULL DEFAULT 'open', -- open | paid | cancelled
+      stripe_session TEXT, stripe_payment TEXT,
+      paid_at       TIMESTAMPTZ,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 }
 
@@ -141,6 +154,7 @@ function quote({ plan, checkIn, checkOut, count }) {
 // ---------- Confirming payments (used by webhook and success page) ----------
 async function confirmFromSession(session) {
   if (!session || session.payment_status !== 'paid') return null;
+  if (session.metadata && session.metadata.payment_request_id) return markRequestPaid(session);
   const id = session.metadata && session.metadata.booking_id;
   if (!id) return null;
   const client = await pool.connect();
@@ -171,6 +185,14 @@ async function confirmFromSession(session) {
     return updated;
   } catch (e) { await client.query('ROLLBACK'); throw e; }
   finally { client.release(); }
+}
+
+async function markRequestPaid(session) {
+  const { rows: [r] } = await pool.query(
+    `UPDATE payment_requests SET status='paid', paid_at=COALESCE(paid_at, now()), stripe_session=$2, stripe_payment=$3
+      WHERE id=$1 AND status<>'cancelled' RETURNING *`,
+    [session.metadata.payment_request_id, session.id, session.payment_intent || null]);
+  return r || null;
 }
 
 // ---------- App ----------
@@ -374,6 +396,91 @@ app.post('/api/admin/bookings', requireOwner, async (req, res) => {
 app.post('/api/admin/bookings/:id/cancel', requireOwner, async (req, res) => {
   const { rowCount } = await pool.query(`UPDATE bookings SET status='cancelled', updated_at=now() WHERE id=$1 AND status<>'cancelled'`, [req.params.id]);
   res.json({ ok: rowCount === 1 });
+});
+
+// ---------- Payment links (owner sends a link; guest pays any amount the owner set) ----------
+const money = c => '$' + (c / 100).toLocaleString('en-US', { minimumFractionDigits: c % 100 ? 2 : 0 });
+
+app.get('/api/admin/payment-requests', requireOwner, async (req, res) => {
+  const { rows } = await pool.query(`SELECT * FROM payment_requests WHERE status<>'cancelled' OR created_at > now() - interval '30 days' ORDER BY created_at DESC LIMIT 200`);
+  res.json({ requests: rows });
+});
+
+app.post('/api/admin/payment-requests', requireOwner, async (req, res) => {
+  const b = req.body || {};
+  const name = clean(b.name, 100), email = clean(b.email, 200), phone = clean(b.phone, 30), description = clean(b.description, 200);
+  const amountCents = Math.round(parseFloat(String(b.amount || '').replace(/[$,\s]/g, '')) * 100);
+  if (name.length < 2) return res.status(400).json({ error: 'Enter who is paying.' });
+  if (!description) return res.status(400).json({ error: 'Say what the payment is for, like "October rent, Site 3".' });
+  if (!(amountCents >= 100 && amountCents <= 1000000)) return res.status(400).json({ error: 'Enter an amount between $1 and $10,000.' });
+  if (email && !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'That email doesn\'t look right.' });
+  const bookingId = parseInt(b.bookingId, 10) || null;
+  const token = crypto.randomBytes(12).toString('base64url');
+  const { rows: [r] } = await pool.query(
+    `INSERT INTO payment_requests (token, booking_id, guest_name, guest_email, guest_phone, description, amount_cents)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`, [token, bookingId, name, email || null, phone || null, description, amountCents]);
+  res.json({ request: r, url: `${BASE_URL}/pay/${token}` });
+});
+
+app.post('/api/admin/payment-requests/:id/cancel', requireOwner, async (req, res) => {
+  const { rowCount } = await pool.query(`UPDATE payment_requests SET status='cancelled' WHERE id=$1 AND status='open'`, [req.params.id]);
+  res.json({ ok: rowCount === 1 });
+});
+
+// Everything paid online, newest first
+app.get('/api/admin/payments', requireOwner, async (req, res) => {
+  const { rows } = await pool.query(`
+    SELECT 'booking' AS kind, id, guest_name, guest_email, guest_phone, amount_cents, updated_at AS paid_at,
+           'Site ' || site || ': ' || plan || ', ' || to_char(check_in,'Mon DD') || ' to ' || to_char(check_out,'Mon DD') AS description
+      FROM bookings WHERE status='confirmed' AND source='web' AND amount_cents > 0
+    UNION ALL
+    SELECT 'link', id, guest_name, guest_email, guest_phone, amount_cents, paid_at, description
+      FROM payment_requests WHERE status='paid'
+    ORDER BY paid_at DESC LIMIT 300`);
+  res.json({ payments: rows });
+});
+
+const findRequest = async token => (await pool.query('SELECT * FROM payment_requests WHERE token=$1', [String(token || '')])).rows[0];
+const publicRequest = r => ({ name: (r.guest_name || '').split(' ')[0], description: r.description, amount: r.amount_cents / 100,
+                              amountText: money(r.amount_cents), status: r.status, paidAt: r.paid_at });
+
+app.get('/pay/:token', (req, res) => res.sendFile(path.join(__dirname, 'public', 'pay.html')));
+
+app.get('/api/pay/:token', async (req, res) => {
+  const r = await findRequest(req.params.token);
+  if (!r) return res.status(404).json({ error: 'This payment link isn\'t valid. Please check the link or call us.' });
+  if (r.status === 'open' && req.query.session_id && stripe && /^cs_[A-Za-z0-9_]+$/.test(req.query.session_id)) {
+    const session = await stripe.checkout.sessions.retrieve(req.query.session_id);
+    if (session.metadata && session.metadata.payment_request_id === String(r.id) && session.payment_status === 'paid') {
+      return res.json(publicRequest(await markRequestPaid(session)));
+    }
+  }
+  res.json(publicRequest(r));
+});
+
+app.post('/api/pay/:token/checkout', async (req, res) => {
+  if (!stripe) return res.status(503).json({ error: 'Online payment is not set up yet. Please call us.' });
+  const r = await findRequest(req.params.token);
+  if (!r) return res.status(404).json({ error: 'This payment link isn\'t valid.' });
+  if (r.status === 'paid') return res.status(409).json({ error: 'This has already been paid. Thank you!' });
+  if (r.status !== 'open') return res.status(410).json({ error: 'This payment link was cancelled. Please call us.' });
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      ...(r.guest_email ? { customer_email: r.guest_email } : {}),
+      client_reference_id: `request-${r.id}`,
+      metadata: { payment_request_id: String(r.id) },
+      payment_intent_data: { description: `${PARK.name}: ${r.description}`, metadata: { payment_request_id: String(r.id) } },
+      line_items: [{ quantity: 1, price_data: { currency: 'usd', unit_amount: r.amount_cents,
+        product_data: { name: r.description, description: `${PARK.name} · ${r.guest_name}` } } }],
+      success_url: `${BASE_URL}/pay/${r.token}?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${BASE_URL}/pay/${r.token}`,
+    });
+    res.json({ url: session.url });
+  } catch (e) {
+    console.error('stripe error', e.message);
+    res.status(502).json({ error: 'The payment page could not be opened. Please try again or call us.' });
+  }
 });
 
 app.get('/healthz', (req, res) => res.send(dbReady ? 'ok' : 'starting: database not connected yet'));

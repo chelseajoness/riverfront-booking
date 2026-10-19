@@ -46,6 +46,16 @@ input,select{width:100%;min-width:0;font:inherit;padding:8px 10px;border:1px sol
 .msg{grid-column:1/-1;font-size:.9rem;color:var(--danger)} .msg:empty{display:none}
 .empty{color:var(--muted);padding:12px 0}
 @media (max-width:560px){.bk{grid-template-columns:50px 1fr}.bk button{grid-column:2;justify-self:start}}
+.hint{color:var(--muted);margin:-6px 0 12px;font-size:.92rem}
+label.wide{grid-column:span 2} @media (max-width:560px){label.wide{grid-column:auto}}
+.newlink{margin-top:12px;background:var(--river-soft);border-radius:10px;padding:14px;display:grid;gap:10px}
+.linkrow{display:flex;gap:8px;flex-wrap:wrap} .linkrow input,.linkrow textarea{flex:1 1 260px;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);resize:vertical}
+.paytable{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.paytable table{border-collapse:collapse;width:100%;font-size:.9rem}
+.paytable th,.paytable td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+.paytable th{font:500 .72rem "IBM Plex Mono",monospace;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.paytable td.num{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.pill.open{background:var(--amber-soft);color:var(--amber)}
 </style>
 </head>
 <body>
@@ -79,6 +89,32 @@ input,select{width:100%;min-width:0;font:inherit;padding:8px 10px;border:1px sol
       <button class="primary" type="submit">Save</button>
       <p class="msg" id="a-msg"></p>
     </form>
+  </section>
+
+  <section>
+    <h2>Send a payment link</h2>
+    <p class="hint">For rent that's due, a balance, or anything else. Copy the link and text or email it. They pay by card and you'll see it here.</p>
+    <form id="req">
+      <label>Who's paying<input id="r-name" maxlength="100" placeholder="Full name"></label>
+      <label>Amount ($)<input id="r-amt" inputmode="decimal" placeholder="500"></label>
+      <label class="wide">What it's for<input id="r-desc" maxlength="200" placeholder="October rent, Site 3"></label>
+      <label>Their phone<input id="r-phone" maxlength="30"></label>
+      <label>Their email (for receipt)<input id="r-email" maxlength="200" type="email"></label>
+      <label>Link to a stay (optional)<select id="r-book"><option value="">None</option></select></label>
+      <button class="primary" type="submit">Create payment link</button>
+      <p class="msg" id="r-msg"></p>
+    </form>
+    <div class="newlink" id="newlink" hidden>
+      <b>Link ready.</b> Copy it and text or email it to them:
+      <div class="linkrow"><input id="nl-url" readonly><button type="button" id="nl-copy">Copy link</button></div>
+      <div class="linkrow"><textarea id="nl-msg" rows="3" readonly></textarea><button type="button" id="nl-copymsg">Copy message</button></div>
+    </div>
+    <div class="list" id="reqs" style="margin-top:14px"></div>
+  </section>
+
+  <section>
+    <h2>Payments received</h2>
+    <div class="paytable"><table id="pays"></table></div>
   </section>
 
   <section>
@@ -151,7 +187,61 @@ $('add').addEventListener('submit',async e=>{
   ['a-name','a-phone','a-notes'].forEach(id=>$(id).value=''); load();
 });
 
-load(); setInterval(load,60000);
+const money=c=>'$'+(c/100).toLocaleString('en-US',{minimumFractionDigits:c%100?2:0});
+const when=t=>new Date(t).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+const copy=async(txt,btn)=>{ try{ await navigator.clipboard.writeText(txt); const o=btn.textContent; btn.textContent='Copied'; setTimeout(()=>btn.textContent=o,1500);}catch(e){} };
+
+async function loadMoney(){
+  const [rq,py]=await Promise.all([fetch('/api/admin/payment-requests').then(r=>r.json()),fetch('/api/admin/payments').then(r=>r.json())]);
+  const reqs=rq.requests||[];
+  $('reqs').innerHTML = reqs.filter(r=>r.status!=='cancelled').map(r=>{
+    const url=location.origin+'/pay/'+r.token;
+    const pill=r.status==='paid'?`<span class="pill">Paid ${when(r.paid_at)}</span>`:'<span class="pill open">Waiting</span>';
+    return `<div class="bk"><div class="site">${money(r.amount_cents)}</div>
+      <div class="who"><div><b>${esc(r.guest_name)}</b>${pill}</div><small>${esc(r.description)} · sent ${when(r.created_at)}</small>
+      ${[r.guest_phone,r.guest_email].filter(Boolean).length?`<small>${[r.guest_phone,r.guest_email].filter(Boolean).map(esc).join(' · ')}</small>`:''}</div>
+      ${r.status==='open'?`<div class="linkrow" style="flex-direction:column"><button data-copylink="${esc(url)}">Copy link</button><button data-cancelreq="${r.id}" data-confirm="0">Cancel link</button></div>`:''}</div>`;
+  }).join('');
+  const pays=py.payments||[];
+  $('pays').innerHTML = pays.length ? '<tr><th>Date</th><th>Who</th><th>For</th><th>Contact</th><th style="text-align:right">Amount</th></tr>'+pays.map(p=>
+    `<tr><td>${when(p.paid_at)}</td><td>${esc(p.guest_name)}</td><td>${esc(p.description)}</td><td>${esc([p.guest_phone,p.guest_email].filter(Boolean).join(' · '))}</td><td class="num">${money(p.amount_cents)}</td></tr>`).join('')
+    : '<tr><td class="empty">No online payments yet.</td></tr>';
+}
+
+function fillStays(){
+  if(!DATA) return; const sel=$('r-book'), keep=sel.value;
+  sel.innerHTML='<option value="">None</option>'+DATA.bookings.filter(b=>b.status==='confirmed').map(b=>`<option value="${b.id}">Site ${b.site}: ${esc(b.guest_name||'Guest')}, ${short(b.check_in)}–${short(b.check_out)}</option>`).join('');
+  sel.value=keep;
+}
+
+$('r-book').addEventListener('change',()=>{
+  const b=DATA&&DATA.bookings.find(x=>String(x.id)===$('r-book').value); if(!b) return;
+  if(!$('r-name').value) $('r-name').value=b.guest_name||''; if(!$('r-phone').value) $('r-phone').value=b.guest_phone||''; if(!$('r-email').value) $('r-email').value=b.guest_email||'';
+});
+
+$('req').addEventListener('submit',async e=>{
+  e.preventDefault(); $('r-msg').textContent='';
+  const r=await fetch('/api/admin/payment-requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    name:$('r-name').value, amount:$('r-amt').value, description:$('r-desc').value, phone:$('r-phone').value, email:$('r-email').value, bookingId:$('r-book').value})});
+  const d=await r.json(); if(!r.ok){ $('r-msg').textContent=d.error; return; }
+  const url=location.origin+'/pay/'+d.request.token, first=(d.request.guest_name||'').split(' ')[0];
+  $('nl-url').value=url;
+  $('nl-msg').value=`Hi ${first}, here's your payment link for Riverfront Retreat RV Park (${d.request.description}, ${money(d.request.amount_cents)}): ${url}`;
+  $('newlink').hidden=false;
+  ['r-name','r-amt','r-desc','r-phone','r-email'].forEach(id=>$(id).value=''); $('r-book').value='';
+  loadMoney();
+});
+$('nl-copy').addEventListener('click',e=>copy($('nl-url').value,e.target));
+$('nl-copymsg').addEventListener('click',e=>copy($('nl-msg').value,e.target));
+$('reqs').addEventListener('click',async e=>{
+  const c=e.target.closest('[data-copylink]'); if(c) return copy(c.dataset.copylink,c);
+  const x=e.target.closest('[data-cancelreq]'); if(!x) return;
+  if(x.dataset.confirm==='0'){ x.dataset.confirm='1'; x.textContent='Tap again to cancel'; return; }
+  await fetch(`/api/admin/payment-requests/${x.dataset.cancelreq}/cancel`,{method:'POST'}); loadMoney();
+});
+
+const _render=render; render=function(){ _render(); fillStays(); };
+load(); loadMoney(); setInterval(()=>{ load(); loadMoney(); },60000);
 </script>
 </body>
 </html>

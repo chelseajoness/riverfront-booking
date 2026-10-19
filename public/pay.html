@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Make a payment · Riverfront Retreat RV Park</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@700&family=Work+Sans:wght@400;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+:root{--bg:#F2F4EF;--surface:#fff;--ink:#16231E;--muted:#56635C;--line:#D5DBD3;--river:#1C6B66;--pine:#1E3A31;--danger:#B3402F}
+@media (prefers-color-scheme:dark){:root{--bg:#0F1714;--surface:#17221E;--ink:#E6ECE8;--muted:#9AA8A1;--line:#2A3832;--river:#4FB3AA;--danger:#E57B69;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 "Work Sans",system-ui,sans-serif}
+header{background:var(--pine);padding:14px max(16px,env(safe-area-inset-left))}
+header a{color:#fff;font:700 1.15rem "Zilla Slab",Georgia,serif;text-decoration:none}
+main{max-width:520px;margin:40px auto;padding:0 16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:28px;display:grid;gap:14px}
+.eyebrow{font:500 .78rem "IBM Plex Mono",monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+h1{font:700 1.7rem/1.2 "Zilla Slab",Georgia,serif;margin:0}
+.amt{font:700 3rem/1 "Zilla Slab",Georgia,serif;font-variant-numeric:tabular-nums}
+p{margin:0} .muted{color:var(--muted)} .err{color:var(--danger)}
+button{font:600 1.05rem "Work Sans",sans-serif;background:var(--river);color:#fff;border:0;border-radius:10px;padding:14px;cursor:pointer;width:100%}
+button:disabled{opacity:.6;cursor:default}
+.lock{font:500 .75rem "IBM Plex Mono",monospace;color:var(--muted);text-align:center}
+</style>
+</head>
+<body>
+<header><a href="/">Riverfront Retreat RV Park</a></header>
+<main><div class="card" id="card"><span class="eyebrow">Payment</span><h1>Loading…</h1></div></main>
+<script>
+const card=document.getElementById('card'), token=location.pathname.split('/').pop();
+const sid=new URLSearchParams(location.search).get('session_id');
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const contact='<p class="muted">Questions? Call or text (601) 408-1851 or (601) 620-8833.</p>';
+async function load(tries=0){
+  let r;
+  try{ const res=await fetch('/api/pay/'+encodeURIComponent(token)+(sid?'?session_id='+encodeURIComponent(sid):'')); r=await res.json(); if(!res.ok) throw new Error(r.error); }
+  catch(e){ card.innerHTML=`<span class="eyebrow">Payment</span><h1>Link not found</h1><p class="err">${esc(e.message)}</p>${contact}`; return; }
+  if(r.status==='open' && sid && tries<5) return setTimeout(()=>load(tries+1),2000);
+  if(r.status==='paid'){
+    card.innerHTML=`<span class="eyebrow">Paid</span><h1>Thank you${r.name?', '+esc(r.name):''}!</h1><div class="amt">${esc(r.amountText)}</div><p>${esc(r.description)}</p><p class="muted">Your receipt is on its way by email.</p>${contact}`; return;
+  }
+  if(r.status!=='open'){ card.innerHTML=`<span class="eyebrow">Payment</span><h1>This link was cancelled</h1>${contact}`; return; }
+  card.innerHTML=`<span class="eyebrow">Payment request</span>
+    <h1>${r.name?'Hi '+esc(r.name)+', h':'H'}ere's your payment</h1>
+    <p>${esc(r.description)}</p>
+    <div class="amt">${esc(r.amountText)}</div>
+    <p class="err" id="err" role="alert"></p>
+    <button id="pay">Pay ${esc(r.amountText)} by card</button>
+    <p class="lock">Card payments processed by Stripe</p>${contact}`;
+  document.getElementById('pay').onclick=async e=>{
+    const b=e.target; b.disabled=true; b.textContent='Opening secure payment…';
+    try{ const res=await fetch('/api/pay/'+encodeURIComponent(token)+'/checkout',{method:'POST'}); const d=await res.json(); if(!res.ok||!d.url) throw new Error(d.error); location.href=d.url; }
+    catch(err){ document.getElementById('err').textContent=err.message||'Something went wrong.'; b.disabled=false; b.textContent='Pay '+r.amountText+' by card'; }
+  };
+}
+load();
+</script>
+</body>
+</html>
