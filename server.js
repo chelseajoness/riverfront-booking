@@ -79,6 +79,24 @@ async function migrate() {
       CHECK (check_out > check_in)
     );
     CREATE INDEX IF NOT EXISTS bookings_dates ON bookings (check_in, check_out);
+    ALTER TABLE bookings ADD COLUMN IF NOT EXISTS application_id BIGINT;
+    CREATE TABLE IF NOT EXISTS applications (
+      id           BIGSERIAL PRIMARY KEY,
+      token        TEXT NOT NULL UNIQUE,          -- secret part of the guest's application link
+      status       TEXT NOT NULL DEFAULT 'pending', -- pending | approved | denied | paid | withdrawn
+      plan         TEXT NOT NULL,
+      check_in     DATE NOT NULL,
+      check_out    DATE NOT NULL,
+      stay_label   TEXT,
+      amount_cents INT NOT NULL,
+      guest_name   TEXT NOT NULL, guest_phone TEXT NOT NULL, guest_email TEXT NOT NULL,
+      rig_type     TEXT, rig_length INT, power TEXT, pets BOOLEAN,
+      details      JSONB NOT NULL DEFAULT '{}'::jsonb,   -- the rest of the application answers
+      booking_id   BIGINT,
+      owner_note   TEXT,                           -- message to the guest when approving/denying
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      decided_at   TIMESTAMPTZ
+    );
     CREATE TABLE IF NOT EXISTS settings (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL DEFAULT ''
@@ -193,6 +211,7 @@ async function confirmFromSession(session) {
         WHERE id=$1 RETURNING *`,
       [b.id, site, notes, session.payment_intent || null, phone || null]);
     await client.query('COMMIT');
+    if (updated.application_id) pool.query(`UPDATE applications SET status='paid' WHERE id=$1`, [updated.application_id]).catch(() => {});
     notifyBooking(updated).catch(e => console.error('notify error', e.message));   // gate code email + owner alerts
     return updated;
   } catch (e) { await client.query('ROLLBACK'); throw e; }
@@ -214,12 +233,14 @@ async function markRequestPaid(session) {
 }
 
 // ---------- Settings (gate code, Wi-Fi, who gets alerts) ----------
-const SETTING_KEYS = ['gate_code', 'wifi_name', 'wifi_password', 'checkin_note', 'alert_emails', 'alert_phones'];
+const SETTING_KEYS = ['gate_code', 'wifi_name', 'wifi_password', 'checkin_note', 'alert_emails', 'alert_phones', 'require_application', 'approval_hours'];
 async function getSettings() {
   const out = Object.fromEntries(SETTING_KEYS.map(k => [k, '']));
   if (!pool) return out;
   const { rows } = await pool.query('SELECT key, value FROM settings');
   rows.forEach(r => { if (SETTING_KEYS.includes(r.key)) out[r.key] = r.value; });
+  if (!out.require_application) out.require_application = 'on';   // applications are on unless the owner turns them off
+  if (!out.approval_hours) out.approval_hours = '48';
   return out;
 }
 const splitList = v => String(v || '').split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
@@ -333,9 +354,11 @@ app.use('/api', (req, res, next) => {
 });
 
 // Public: park settings for the website
-app.get('/api/config', (req, res) => {
+app.get('/api/config', async (req, res) => {
+  let requireApplication = true;
+  try { requireApplication = dbReady ? (await getSettings()).require_application !== 'off' : true; } catch (_) {}
   res.json({ sites: PARK.sites, rates: PARK.rates, maxNights: PARK.maxNights, maxWeeks: PARK.maxWeeks,
-             maxMonths: PARK.maxMonths, today: todayLocal(), paymentsOn: !!stripe });
+             maxMonths: PARK.maxMonths, today: todayLocal(), paymentsOn: !!stripe, requireApplication });
 });
 
 // Public: how many sites are open for a stay
@@ -351,6 +374,7 @@ app.get('/api/availability', async (req, res) => {
 const clean = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 app.post('/api/checkout', async (req, res) => {
   if (!stripe) return res.status(503).json({ error: 'Online payment is not set up yet. Please call to book.' });
+  if ((await getSettings()).require_application !== 'off') return res.status(400).json({ error: 'Please submit an application for your dates.' });
   let q;
   const b = req.body || {};
   try { q = quote(b); } catch (e) { return res.status(400).json({ error: e.message }); }
@@ -433,6 +457,11 @@ app.get('/api/booking-status', async (req, res) => {
   if (!stripe || !/^cs_[A-Za-z0-9_]+$/.test(sid)) return res.status(400).json({ error: 'Missing booking reference.' });
   try {
     let { rows: [b] } = await pool.query('SELECT * FROM bookings WHERE stripe_session=$1', [sid]);
+    if (!b) {
+      const session = await stripe.checkout.sessions.retrieve(sid);
+      const bid = session && session.metadata && session.metadata.booking_id;
+      if (bid) b = (await pool.query('SELECT * FROM bookings WHERE id=$1', [bid])).rows[0];
+    }
     if (!b) return res.status(404).json({ error: 'Booking not found.' });
     if (b.status !== 'confirmed') {
       const session = await stripe.checkout.sessions.retrieve(sid);
@@ -631,6 +660,153 @@ app.post('/api/pay/:token/checkout', async (req, res) => {
     console.error('stripe error', e.message);
     res.status(502).json({ error: 'The payment page could not be opened. Please try again or call us.' });
   }
+});
+
+// ---------- Applications: guest applies → owner approves → guest pays → confirmed ----------
+const RIG_NAMES = { ClassA: 'Class A', ClassB: 'Class B', ClassC: 'Class C', '5thWheel': 'Fifth wheel', TravelTrailer: 'Travel trailer', Other: 'Other rig' };
+const emailWrap = inner => `<div style="font:16px/1.5 -apple-system,Segoe UI,sans-serif;color:#16231E;max-width:520px">${inner}<p style="color:#56635C;font-size:14px">Riverfront Retreat RV Park · 120 Old Hwy 24, New Augusta, MS 39462 · (601) 408-1851 or (601) 620-8833</p></div>`;
+const appLink = a => `${BASE_URL}/apply/${a.token}`;
+
+app.post('/api/apply', async (req, res) => {
+  const b = req.body || {};
+  let q; try { q = quote(b); } catch (e) { return res.status(400).json({ error: e.message }); }
+  const name = clean(b.name, 100), phone = clean(b.phone, 30), email = clean(b.email, 200);
+  const rigType = clean(b.rigType, 40), power = b.power === '30A' ? '30A' : '50A';
+  const rigLength = parseInt(b.rigLength, 10), pets = !!b.pets;
+  if (name.length < 2) return res.status(400).json({ error: 'Enter your name.' });
+  if (phone.replace(/\D/g, '').length < 10) return res.status(400).json({ error: 'Enter a 10-digit phone number.' });
+  if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email.' });
+  if (!(rigLength >= 10 && rigLength <= 65)) return res.status(400).json({ error: 'Enter a rig length between 10 and 65 feet.' });
+  const d = b.details || {};
+  const details = {
+    adults: clean(String(d.adults ?? ''), 3), children: clean(String(d.children ?? ''), 3),
+    petDetails: clean(d.petDetails, 200), rigYear: clean(d.rigYear, 10),
+    vehicle: clean(d.vehicle, 120), plate: clean(d.plate, 30),
+    reason: clean(d.reason, 300), employer: clean(d.employer, 120),
+    emergencyName: clean(d.emergencyName, 100), emergencyPhone: clean(d.emergencyPhone, 30),
+    referral: clean(d.referral, 120), notes: clean(d.notes, 600), agreed: !!d.agreed,
+  };
+  if (!(parseInt(details.adults, 10) >= 1)) return res.status(400).json({ error: 'Enter how many adults will stay.' });
+  if (!details.reason) return res.status(400).json({ error: 'Tell us a little about your stay.' });
+  if (!details.emergencyName || details.emergencyPhone.replace(/\D/g, '').length < 10) return res.status(400).json({ error: 'Enter an emergency contact name and phone.' });
+  if (!details.agreed) return res.status(400).json({ error: 'Please agree to the park rules.' });
+  const free = await freeSites(pool, q.checkIn, q.checkOut);
+  if (!free.length) return res.status(409).json({ error: 'Sorry, all sites are booked for those dates. Try different dates or call us.' });
+
+  const token = crypto.randomBytes(12).toString('base64url');
+  const { rows: [a] } = await pool.query(
+    `INSERT INTO applications (token, plan, check_in, check_out, stay_label, amount_cents, guest_name, guest_phone, guest_email, rig_type, rig_length, power, pets, details)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+    [token, q.plan, q.checkIn, q.checkOut, q.label, q.chargeCents, name, phone, email, rigType, rigLength, power, pets, details]);
+  ownerAlert(`📝 New application: ${name}, ${fmtDate(q.checkIn)} to ${fmtDate(q.checkOut)} (${q.label}, ${q.plan}). ${RIG_NAMES[rigType] || rigType} ${rigLength}ft. Phone ${phone}.\nReview it on the owner page.`,
+    `New application: ${name}, ${fmtDate(q.checkIn)}`).catch(e => console.error('notify error', e.message));
+  sendEmail(email, 'We received your application · Riverfront Retreat RV Park', emailWrap(
+    `<h2 style="font-family:Georgia,serif;margin:0 0 8px">Thanks, ${escHtml(name.split(' ')[0])}!</h2>
+     <p>We received your application for <b>${fmtDate(q.checkIn)} to ${fmtDate(q.checkOut)}</b> (${escHtml(q.label)}). We'll review it and email you, usually within a day.</p>
+     <p>Once approved, you'll get a link to pay and lock in your site. You can check your status any time: <a href="${appLink(a)}">${appLink(a)}</a></p>`)).catch(() => {});
+  res.json({ ok: true, token: a.token, url: `/apply/${a.token}` });
+});
+
+// Guest's application page
+app.get('/apply/:token', (req, res) => res.sendFile(path.join(__dirname, 'public', 'apply.html')));
+app.get('/api/apply/:token', async (req, res) => {
+  const { rows: [a] } = await pool.query('SELECT * FROM applications WHERE token=$1', [String(req.params.token)]);
+  if (!a) return res.status(404).json({ error: 'Application not found. Please check the link or call us.' });
+  let b = null;
+  if (a.booking_id) b = (await pool.query('SELECT * FROM bookings WHERE id=$1', [a.booking_id])).rows[0];
+  const holdOk = b && b.status === 'pending' && b.hold_expires && new Date(b.hold_expires) > new Date();
+  res.json({
+    status: a.status, name: a.guest_name.split(' ')[0], plan: a.plan, label: a.stay_label,
+    checkIn: iso(a.check_in), checkOut: iso(a.check_out), amount: a.amount_cents / 100,
+    site: b ? b.site : null, payBy: holdOk ? b.hold_expires : null, canPay: a.status === 'approved' && !!holdOk && !!stripe,
+    expired: a.status === 'approved' && !holdOk && !(b && b.status === 'confirmed'),
+    message: a.owner_note || '',
+  });
+});
+// Approved guest pays → Stripe Checkout for their held site
+app.post('/api/apply/:token/checkout', async (req, res) => {
+  if (!stripe) return res.status(503).json({ error: 'Online payment is not set up yet. Please call us.' });
+  const { rows: [a] } = await pool.query('SELECT * FROM applications WHERE token=$1', [String(req.params.token)]);
+  if (!a || a.status !== 'approved' || !a.booking_id) return res.status(400).json({ error: 'This application is not ready for payment.' });
+  const { rows: [b] } = await pool.query('SELECT * FROM bookings WHERE id=$1', [a.booking_id]);
+  if (!b || b.status !== 'pending' || !(b.hold_expires && new Date(b.hold_expires) > new Date()))
+    return res.status(410).json({ error: 'Your approval has expired. Please call us and we will set you back up.' });
+  try {
+    const planName = { nightly: 'Nightly', weekly: 'Weekly', monthly: 'Monthly' }[a.plan];
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment', customer_email: a.guest_email, phone_number_collection: { enabled: true },
+      client_reference_id: String(b.id),
+      metadata: { booking_id: String(b.id), application_id: String(a.id), site: String(b.site), check_in: iso(b.check_in), check_out: iso(b.check_out), plan: a.plan },
+      payment_intent_data: { description: `${PARK.name}: ${planName}, ${fmtDate(iso(b.check_in))} to ${fmtDate(iso(b.check_out))}`, metadata: { booking_id: String(b.id) } },
+      line_items: [{ quantity: 1, price_data: { currency: 'usd', unit_amount: b.amount_cents,
+        product_data: { name: `RV Site ${b.site}: ${planName}, ${a.stay_label || ''}`.trim(), description: `${fmtDate(iso(b.check_in))} to ${fmtDate(iso(b.check_out))}` } } }],
+      success_url: `${BASE_URL}/success.html?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: appLink(a),
+    });
+    await pool.query('UPDATE bookings SET stripe_session=$2 WHERE id=$1', [b.id, session.id]);
+    res.json({ url: session.url });
+  } catch (e) {
+    console.error('stripe error', e.message);
+    res.status(502).json({ error: 'The payment page could not be opened. Please try again or call us.' });
+  }
+});
+
+// Owner: list, approve, decline
+app.get('/api/admin/applications', requireOwner, async (req, res) => {
+  const { rows } = await pool.query(`
+    SELECT a.*, b.site, b.status AS booking_status, b.hold_expires
+      FROM applications a LEFT JOIN bookings b ON b.id = a.booking_id
+     WHERE a.status IN ('pending','approved') OR a.created_at > now() - interval '30 days'
+     ORDER BY (a.status='pending') DESC, a.created_at DESC LIMIT 200`);
+  res.json({ applications: rows.map(r => ({ ...r, check_in: iso(r.check_in), check_out: iso(r.check_out), url: appLink(r) })), emailOn: !!RESEND_API_KEY });
+});
+
+app.post('/api/admin/applications/:id/approve', requireOwner, async (req, res) => {
+  const st = await getSettings();
+  const hours = Math.min(168, Math.max(6, parseInt(st.approval_hours, 10) || 48));
+  const wantSite = parseInt((req.body || {}).site, 10) || null;
+  const note = clean((req.body || {}).message, 500);
+  const client = await pool.connect();
+  let a, booking;
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(42)');
+    a = (await client.query('SELECT * FROM applications WHERE id=$1 FOR UPDATE', [req.params.id])).rows[0];
+    if (!a || a.status !== 'pending') { await client.query('ROLLBACK'); return res.status(400).json({ error: 'This application was already handled.' }); }
+    const free = await freeSites(client, iso(a.check_in), iso(a.check_out));
+    const site = wantSite ? (free.includes(wantSite) ? wantSite : null) : free[0];
+    if (!site) { await client.query('ROLLBACK'); return res.status(409).json({ error: wantSite ? `Site ${wantSite} is not free for those dates.` : 'No sites are free for those dates anymore.' }); }
+    let q = {}; try { q = quote({ plan: a.plan, checkIn: iso(a.check_in), checkOut: iso(a.check_out), count: (a.stay_label || '').split(' ')[0] }); } catch (_) {}
+    booking = (await client.query(
+      `INSERT INTO bookings (site, check_in, check_out, plan, status, amount_cents, guest_name, guest_phone, guest_email,
+                             rig_type, rig_length, power, pets, notes, hold_token, hold_expires, application_id)
+       VALUES ($1,$2,$3,$4,'pending',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now() + ($15 || ' hours')::interval, $16) RETURNING *`,
+      [site, a.check_in, a.check_out, a.plan, a.amount_cents, a.guest_name, a.guest_phone, a.guest_email, a.rig_type, a.rig_length, a.power, a.pets,
+       q.note || null, crypto.randomBytes(16).toString('hex'), String(hours), a.id])).rows[0];
+    a = (await client.query(`UPDATE applications SET status='approved', booking_id=$2, owner_note=$3, decided_at=now() WHERE id=$1 RETURNING *`, [a.id, booking.id, note || null])).rows[0];
+    await client.query('COMMIT');
+  } catch (e) { await client.query('ROLLBACK'); console.error(e); return res.status(500).json({ error: 'Could not approve. Try again.' }); }
+  finally { client.release(); }
+
+  const payBy = new Date(booking.hold_expires).toLocaleString('en-US', { timeZone: PARK.timeZone, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const emailed = await sendEmail(a.guest_email, `You're approved! Pay to lock in Site ${booking.site} · Riverfront Retreat`, emailWrap(
+    `<h2 style="font-family:Georgia,serif;margin:0 0 8px">You're approved, ${escHtml(a.guest_name.split(' ')[0])}!</h2>
+     <p>Your application for <b>${fmtDate(iso(a.check_in))} to ${fmtDate(iso(a.check_out))}</b> is approved, and we're holding <b>Site ${booking.site}</b> for you.</p>
+     ${note ? `<p>${escHtml(note)}</p>` : ''}
+     <p>Pay <b>${money(a.amount_cents)}</b> by <b>${payBy}</b> to confirm your stay:</p>
+     <p><a href="${appLink(a)}" style="display:inline-block;background:#1C6B66;color:#fff;padding:12px 20px;border-radius:10px;text-decoration:none;font-weight:600">Pay and confirm my site</a></p>
+     <p style="font-size:14px;color:#56635C">After you pay, you'll get your gate code and Wi-Fi details.</p>`)).catch(() => false);
+  res.json({ ok: true, site: booking.site, emailed, url: appLink(a), payBy,
+    text: `Hi ${a.guest_name.split(' ')[0]}, your application at Riverfront Retreat RV Park is approved! Site ${booking.site} is held for you until ${payBy}. Pay ${money(a.amount_cents)} here to confirm: ${appLink(a)}` });
+});
+
+app.post('/api/admin/applications/:id/deny', requireOwner, async (req, res) => {
+  const note = clean((req.body || {}).message, 500);
+  const { rows: [a] } = await pool.query(`UPDATE applications SET status='denied', owner_note=$2, decided_at=now() WHERE id=$1 AND status='pending' RETURNING *`, [req.params.id, note || null]);
+  if (!a) return res.status(400).json({ error: 'This application was already handled.' });
+  const emailed = (req.body || {}).notify === false ? false : await sendEmail(a.guest_email, 'About your application · Riverfront Retreat RV Park', emailWrap(
+    `<p>Hi ${escHtml(a.guest_name.split(' ')[0])},</p><p>Thank you for applying for ${fmtDate(iso(a.check_in))} to ${fmtDate(iso(a.check_out))}. Unfortunately we aren't able to approve this stay.</p>${note ? `<p>${escHtml(note)}</p>` : ''}<p>Thank you for thinking of us.</p>`)).catch(() => false);
+  res.json({ ok: true, emailed });
 });
 
 // ---------- Owner settings ----------

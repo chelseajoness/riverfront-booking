@@ -61,6 +61,13 @@ h2{font:700 1.35rem "Zilla Slab",Georgia,serif;margin:0 0 12px}
 .pill.hold,.pill.open{background:var(--amber-soft);color:var(--amber)} .pill.block{background:var(--block);color:var(--ink)}
 .pill.alert{background:var(--danger);color:#fff}
 .empty{color:var(--muted);background:var(--surface);border:1px dashed var(--line);border-radius:12px;padding:18px;text-align:center}
+.app-details{grid-column:2/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:4px 16px;font-size:.88rem;background:var(--bg);border-radius:10px;padding:10px 12px;margin-top:4px}
+.app-details div{min-width:0;overflow-wrap:anywhere} .app-details b{display:block;font:500 .66rem "IBM Plex Mono",monospace;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.app-decide{grid-column:1/-1;display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:end;margin-top:6px}
+.app-decide .msgin{grid-column:1/-1}
+.app-decide .btns{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap}
+.app-decide .btns button{flex:1 1 140px}
+.approved-box{grid-column:1/-1;background:var(--river-soft);border-radius:10px;padding:12px;display:grid;gap:8px;margin-top:6px}
 .amt{font:700 1.15rem "Zilla Slab",Georgia,serif;font-variant-numeric:tabular-nums;white-space:nowrap}
 
 /* buttons & forms */
@@ -131,7 +138,7 @@ table.grid{border-collapse:separate;border-spacing:0;font-size:.78rem}
   </div>
   <nav class="tabs" aria-label="Sections">
     <div class="tabs-in" role="tablist">
-      <button class="tab" role="tab" data-tab="today" aria-selected="true"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Today</button>
+      <button class="tab" role="tab" data-tab="today" aria-selected="true"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Today<span class="dot" id="appCount" hidden></span></button>
       <button class="tab" role="tab" data-tab="calendar" aria-selected="false"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Calendar</button>
       <button class="tab" role="tab" data-tab="payments" aria-selected="false"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M6 15h4"/></svg>Payments<span class="dot" id="openCount" hidden></span></button>
       <button class="tab" role="tab" data-tab="add" aria-selected="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>Add</button>
@@ -146,6 +153,10 @@ table.grid{border-collapse:separate;border-spacing:0;font-size:.78rem}
 
   <!-- TODAY -->
   <section class="panel" id="p-today">
+    <div id="appsWrap" hidden>
+      <h2>Applications to review</h2>
+      <div class="list" id="apps"></div>
+    </div>
     <div class="stats">
       <div class="stat"><b id="st-tonight">–</b><span>sites filled tonight</span></div>
       <div class="stat"><b id="st-arrive">–</b><span>arriving in 7 days</span></div>
@@ -235,6 +246,16 @@ table.grid{border-collapse:separate;border-spacing:0;font-size:.78rem}
         <label class="full">Check-in note (optional)<input id="s-note" maxlength="300" placeholder="e.g. Check-in after 2 PM. Your site number is on the post."></label>
         <button class="primary" type="submit">Save</button>
         <p class="msg" id="s-msg1"></p>
+      </form>
+    </div>
+    <div>
+      <h2>Applications</h2>
+      <p class="hint">When on, guests fill out an application instead of paying right away. You approve it here, and they get an email with a link to pay.</p>
+      <form class="box" id="set-apps" novalidate>
+        <label>Guests must apply first<select id="s-reqapp"><option value="on">On: review every stay</option><option value="off">Off: guests pay right away</option></select></label>
+        <label>Hours to pay after approval<input id="s-hours" type="number" min="6" max="168" inputmode="numeric"></label>
+        <button class="primary" type="submit">Save</button>
+        <p class="msg" id="s-msg3"></p>
       </form>
     </div>
     <div>
@@ -328,7 +349,7 @@ function render(){
   // upcoming
   const up=live.filter(b=>b.check_out>=today);
   $('list').innerHTML = up.length ? up.map(b=>{
-    const pill = b.status==='blocked'?'<span class="pill block">Blocked</span>':b.status==='pending'?'<span class="pill hold">Paying now</span>':(b.source==='owner'?'<span class="pill">Phone</span>':'<span class="pill">Paid online</span>');
+    const pill = b.status==='blocked'?'<span class="pill block">Blocked</span>':b.status==='pending'&&b.application_id?`<span class="pill hold">Approved · awaiting payment</span>`:b.status==='pending'?'<span class="pill hold">Paying now</span>':(b.source==='owner'?'<span class="pill">Phone</span>':'<span class="pill">Paid online</span>');
     const alert = (b.notes||'').startsWith('PAID BUT') ? '<span class="pill alert">Needs attention</span>' : '';
     const here = b.check_in<=today && b.check_out>today && b.status==='confirmed' ? '<span class="pill">Here now</span>' : '';
     const rig = b.rig_type ? `${esc(RIG[b.rig_type]||b.rig_type)} · ${b.rig_length||'?'} ft · ${esc(b.power||'')}${b.pets?' · pets':''}` : '';
@@ -343,6 +364,7 @@ function render(){
       ${b.notes&&b.status!=='blocked'?`<div class="meta">${esc(b.notes)}</div>`:''}</div>`;
   }).join('') : '<p class="empty">No upcoming stays yet. Add a phone booking from the Add tab, or wait for online bookings.</p>';
   fillStays();
+  renderApps();
 }
 $('grid').addEventListener('click',e=>{ const td=e.target.closest('td[data-info]'); $('cellinfo').textContent=td?td.dataset.info:''; });
 $('list').addEventListener('click',async e=>{
@@ -474,12 +496,77 @@ $('reqs').addEventListener('click',e=>{
   confirmTap(x,'Tap again',async()=>{ await api(`/api/admin/payment-requests/${x.dataset.cancelreq}/cancel`,{method:'POST'}); loadMoney(); });
 });
 
+/* applications */
+let APPS=[], EMAIL_ON=false;
+const RIGN={ClassA:'Class A',ClassB:'Class B',ClassC:'Class C','5thWheel':'Fifth wheel',TravelTrailer:'Travel trailer',Other:'Other rig'};
+function freeSitesFor(a){
+  if(!DATA) return [];
+  const live=DATA.bookings.filter(b=>b.status!=='cancelled');
+  const taken=new Set(live.filter(b=>b.check_in<a.check_out && b.check_out>a.check_in).map(b=>b.site));
+  return [...Array(DATA.sites)].map((_,i)=>i+1).filter(s=>!taken.has(s));
+}
+async function loadApps(){
+  const {ok,data}=await api('/api/admin/applications'); if(!ok) return;
+  APPS=data.applications; EMAIL_ON=data.emailOn; renderApps();
+}
+function renderApps(){
+  const pending=APPS.filter(a=>a.status==='pending');
+  $('appCount').textContent=pending.length; $('appCount').hidden=!pending.length;
+  $('appsWrap').hidden=!pending.length;
+  $('apps').innerHTML=pending.map(a=>{
+    const d=a.details||{}, free=freeSitesFor(a);
+    const phone=`<a href="tel:${esc(a.guest_phone.replace(/[^\d+]/g,''))}">${esc(a.guest_phone)}</a>`;
+    const rows=[['Rig',`${RIGN[a.rig_type]||a.rig_type||''} ${a.rig_length||''}ft${d.rigYear?' · '+esc(d.rigYear):''} · ${esc(a.power||'')}`],
+      ['People',`${esc(d.adults||'?')} adult(s)${+d.children?`, ${esc(d.children)} child(ren)`:''}`],
+      ['Pets', a.pets?(esc(d.petDetails)||'Yes'):'None'],['Vehicle',[d.vehicle,d.plate].filter(Boolean).map(esc).join(' · ')||'—'],
+      ['Reason',esc(d.reason||'—')],['Employer',esc(d.employer||'—')],
+      ['Emergency contact',`${esc(d.emergencyName||'')} ${esc(d.emergencyPhone||'')}`],['Heard about us',esc(d.referral||'—')],
+      ...(d.notes?[['Notes',esc(d.notes)]]:[])].map(([k,v])=>`<div><b>${k}</b>${v}</div>`).join('');
+    return `<div class="card" data-app="${a.id}"><div class="badge money">${money(a.amount_cents)}</div>
+      <div class="name">${esc(a.guest_name)} <span class="pill hold">New</span></div>
+      <div class="meta">${short(a.check_in)} → ${short(a.check_out)} · ${esc(a.stay_label||'')} ${esc(a.plan)} · applied ${when(a.created_at)}</div>
+      <div class="meta">${phone} · ${esc(a.guest_email)}</div>
+      <div class="app-details">${rows}</div>
+      <div class="app-decide">
+        <label>Site<select class="siteSel">${free.length?`<option value="">Auto (Site ${free[0]})</option>`+free.map(s=>`<option value="${s}">Site ${s}</option>`).join(''):'<option value="">No sites free</option>'}</select></label>
+        <span></span>
+        <label class="msgin">Message to guest (optional)<input class="msgIn" maxlength="500" placeholder="e.g. Welcome! Check-in is after 2 PM."></label>
+        <div class="btns"><button class="primary" data-approve="${a.id}" ${free.length?'':'disabled'}>Approve</button><button data-deny="${a.id}">Decline</button></div>
+        <p class="msg appMsg"></p>
+      </div></div>`;
+  }).join('');
+}
+$('apps').addEventListener('click',async e=>{
+  const ap=e.target.closest('[data-approve]'), dn=e.target.closest('[data-deny]');
+  if(!ap&&!dn) return;
+  const cardEl=e.target.closest('[data-app]'), id=cardEl.dataset.app, msg=cardEl.querySelector('.msgIn').value, out=cardEl.querySelector('.appMsg');
+  out.textContent='';
+  if(dn){
+    confirmTap(dn,'Tap again to decline',async()=>{
+      const {ok,data}=await api(`/api/admin/applications/${id}/deny`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})});
+      if(!ok){ out.textContent=data.error; return; }
+      toast(data.emailed?'Declined · guest emailed':'Declined'); loadApps();
+    }); return;
+  }
+  ap.disabled=true; ap.textContent='Approving…';
+  const {ok,data}=await api(`/api/admin/applications/${id}/approve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({site:cardEl.querySelector('.siteSel').value,message:msg})});
+  if(!ok){ out.textContent=data.error; ap.disabled=false; ap.textContent='Approve'; return; }
+  cardEl.querySelector('.app-decide').outerHTML=`<div class="approved-box"><b>Approved · Site ${data.site} held until ${esc(data.payBy)}</b>
+    <span>${data.emailed?'The guest was emailed a link to pay.':'Email isn\'t set up yet, so text the guest this message:'}</span>
+    <textarea readonly rows="3">${esc(data.text)}</textarea>
+    <div class="copyrow"><button type="button" class="primary" data-copytext>Copy message</button></div></div>`;
+  toast(data.emailed?'Approved · guest emailed':'Approved · copy the message to text them');
+  load(); setTimeout(loadApps,15000);
+});
+$('apps').addEventListener('click',e=>{ const c=e.target.closest('[data-copytext]'); if(c){ const t=c.closest('.approved-box').querySelector('textarea'); copy(t.value,c); } });
+loadApps();
+
 /* settings */
 async function loadSettings(){
   const {ok,data}=await api('/api/admin/settings'); if(!ok) return;
   const st=data.settings;
   $('s-gate').value=st.gate_code; $('s-wifi').value=st.wifi_name; $('s-wifipw').value=st.wifi_password; $('s-note').value=st.checkin_note;
-  $('s-phones').value=st.alert_phones; $('s-emails').value=st.alert_emails;
+  $('s-phones').value=st.alert_phones; $('s-emails').value=st.alert_emails; $('s-reqapp').value=st.require_application==='off'?'off':'on'; $('s-hours').value=st.approval_hours||'48';
   $('s-status').innerHTML = `Texts: <b>${data.textOn?'on':'not set up yet'}</b> · Emails: <b>${data.emailOn?'on':'not set up yet'}</b>`;
 }
 async function saveSettings(e,fields,msgId){
@@ -490,6 +577,7 @@ async function saveSettings(e,fields,msgId){
 }
 $('set-stay').addEventListener('submit',e=>saveSettings(e,[['s-gate','gate_code'],['s-wifi','wifi_name'],['s-wifipw','wifi_password'],['s-note','checkin_note']],'s-msg1'));
 $('set-alerts').addEventListener('submit',e=>saveSettings(e,[['s-phones','alert_phones'],['s-emails','alert_emails']],'s-msg2'));
+$('set-apps').addEventListener('submit',e=>saveSettings(e,[['s-reqapp','require_application'],['s-hours','approval_hours']],'s-msg3'));
 $('s-test').addEventListener('click',async()=>{ const {data}=await api('/api/admin/test-alert',{method:'POST'}); toast(data.ok?'Test alert sent':'Nothing sent yet: texts and email need to be set up'); });
 loadSettings();
 
@@ -500,8 +588,8 @@ fetch('/api/config').then(r=>r.json()).then(c=>{
   if(!$('a-in').value && c.today){ $('a-in').value=c.today; $('a-out').value=addDays(c.today,1); addSummary(); }
 }).catch(()=>{ const sel=$('a-site'); if(!sel.options.length) for(let i=1;i<=6;i++) sel.add(new Option('Site '+i,i)); });
 load(); loadMoney();
-setInterval(()=>{ if(!document.hidden){ load(); loadMoney(); } },60000);
-document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ load(); loadMoney(); } });
+setInterval(()=>{ if(!document.hidden){ load(); loadMoney(); loadApps(); } },60000);
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ load(); loadMoney(); loadApps(); } });
 </script>
 </body>
 </html>

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Your application · Riverfront Retreat RV Park</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@700&family=Work+Sans:wght@400;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+:root{--bg:#F2F4EF;--surface:#fff;--ink:#16231E;--muted:#56635C;--line:#D5DBD3;--river:#1C6B66;--on-river:#fff;--river-soft:#DCEBE8;--pine:#1E3A31;--amber:#B9781C;--amber-soft:#F4E6CF;--danger:#B3402F}
+@media (prefers-color-scheme:dark){:root{--bg:#0F1714;--surface:#17221E;--ink:#E6ECE8;--muted:#9AA8A1;--line:#2A3832;--river:#4FB3AA;--on-river:#06201D;--river-soft:#183330;--amber:#E0A34A;--amber-soft:#3A2D18;--danger:#E57B69;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 "Work Sans",system-ui,sans-serif}
+header{background:var(--pine);padding:14px max(16px,env(safe-area-inset-left))}
+header a{color:#fff;font:700 1.15rem "Zilla Slab",Georgia,serif;text-decoration:none}
+main{max-width:540px;margin:40px auto;padding:0 16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:28px;display:grid;gap:14px}
+.eyebrow{font:500 .78rem "IBM Plex Mono",monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+h1{font:700 1.8rem/1.2 "Zilla Slab",Georgia,serif;margin:0}
+p{margin:0} .muted{color:var(--muted)} .err{color:var(--danger)}
+dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0}
+dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.status{justify-self:start;font:500 .75rem "IBM Plex Mono",monospace;text-transform:uppercase;letter-spacing:.08em;padding:4px 10px;border-radius:6px;background:var(--amber-soft);color:var(--amber)}
+.status.ok{background:var(--river-soft);color:var(--river)}
+.status.no{background:var(--line);color:var(--ink)}
+.note{background:var(--bg);border-radius:10px;padding:12px 14px}
+button{font:600 1.05rem "Work Sans",sans-serif;background:var(--river);color:var(--on-river);border:0;border-radius:10px;padding:14px;cursor:pointer;width:100%}
+button:disabled{opacity:.6;cursor:default}
+.lock{font:500 .75rem "IBM Plex Mono",monospace;color:var(--muted);text-align:center}
+</style>
+</head>
+<body>
+<header><a href="/">Riverfront Retreat RV Park</a></header>
+<main><div class="card" id="card"><span class="eyebrow">Application</span><h1>Loading…</h1></div></main>
+<script>
+const card=document.getElementById('card'), token=location.pathname.split('/').pop();
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=s=>new Date(s+'T00:00:00Z').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric',timeZone:'UTC'});
+const money=n=>'$'+n.toLocaleString('en-US');
+const contact='<p class="muted">Questions? Call or text (601) 408-1851 or (601) 620-8833.</p>';
+(async function(){
+  let a;
+  try{ const r=await fetch('/api/apply/'+encodeURIComponent(token)); a=await r.json(); if(!r.ok) throw new Error(a.error); }
+  catch(e){ card.innerHTML=`<span class="eyebrow">Application</span><h1>Not found</h1><p class="err">${esc(e.message)}</p>${contact}`; return; }
+  const stay=`<dl><dt>Arrive</dt><dd>${fmt(a.checkIn)}</dd><dt>Leave</dt><dd>${fmt(a.checkOut)}</dd><dt>Stay</dt><dd>${esc(a.label||'')} · ${esc(a.plan)}</dd>${a.site?`<dt>Site</dt><dd>Site ${a.site}</dd>`:''}<dt>${a.status==='paid'?'Paid':'Due once approved'}</dt><dd>${money(a.amount)}</dd></dl>`;
+  const msg=a.message?`<p class="note">${esc(a.message)}</p>`:'';
+  if(a.status==='pending'){
+    card.innerHTML=`<span class="eyebrow">Application received</span><h1>Thanks, ${esc(a.name)}!</h1><span class="status">Under review</span>
+      <p>We're reviewing your application and will email you, usually within a day. Once you're approved, you'll pay here to lock in your site.</p>${stay}${contact}`;
+  } else if(a.status==='approved' && a.canPay){
+    const by=new Date(a.payBy).toLocaleString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+    card.innerHTML=`<span class="eyebrow">Application</span><h1>You're approved, ${esc(a.name)}!</h1><span class="status ok">Approved</span>
+      <p>We're holding <b>Site ${a.site}</b> for you until <b>${esc(by)}</b>. Pay to confirm your stay.</p>${msg}${stay}
+      <p class="err" id="err" role="alert"></p><button id="pay">Pay ${money(a.amount)} and confirm</button><p class="lock">Card payments processed by Stripe</p>${contact}`;
+    document.getElementById('pay').onclick=async e=>{
+      const b=e.target; b.disabled=true; b.textContent='Opening secure payment…';
+      try{ const r=await fetch('/api/apply/'+encodeURIComponent(token)+'/checkout',{method:'POST'}); const d=await r.json(); if(!r.ok||!d.url) throw new Error(d.error); location.href=d.url; }
+      catch(err){ document.getElementById('err').textContent=err.message||'Something went wrong.'; b.disabled=false; b.textContent='Pay '+money(a.amount)+' and confirm'; }
+    };
+  } else if(a.status==='approved' && a.expired){
+    card.innerHTML=`<span class="eyebrow">Application</span><h1>Your approval expired</h1><span class="status no">Expired</span><p>The time to pay for this stay has passed. Call or text us and we'll get you set back up.</p>${stay}${contact}`;
+  } else if(a.status==='paid'){
+    card.innerHTML=`<span class="eyebrow">Application</span><h1>You're all set, ${esc(a.name)}!</h1><span class="status ok">Booked &amp; paid</span><p>Your gate code and Wi-Fi details are in your confirmation email.</p>${stay}${contact}`;
+  } else if(a.status==='denied'){
+    card.innerHTML=`<span class="eyebrow">Application</span><h1>We're unable to approve this stay</h1><span class="status no">Not approved</span><p>Thank you for your interest in Riverfront Retreat.</p>${msg}${contact}`;
+  } else {
+    card.innerHTML=`<span class="eyebrow">Application</span><h1>This application is closed</h1>${contact}`;
+  }
+})();
+</script>
+</body>
+</html>

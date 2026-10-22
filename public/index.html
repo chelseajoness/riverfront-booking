@@ -109,6 +109,9 @@ legend{font-family:var(--display);font-size:1.2rem;font-weight:700;margin-bottom
 .row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .field{display:grid;gap:5px;min-width:0}
 .field label{font-size:.88rem;font-weight:500}
+.field textarea{font:inherit;font-size:1rem;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);width:100%;resize:vertical}
+.agree{display:flex;gap:10px;align-items:flex-start;font-size:.95rem;cursor:pointer}
+.agree input{width:20px;height:20px;margin-top:2px;flex:0 0 auto;accent-color:var(--river)}
 .field input,.field select{font:inherit;font-size:1rem;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);width:100%;min-width:0}
 .field input:focus,.field select:focus{border-color:var(--river);outline:none;box-shadow:0 0 0 3px var(--river-soft)}
 .field .hint{font-size:.8rem;color:var(--muted)}
@@ -243,7 +246,7 @@ footer .wrap{padding-block:28px;display:flex;justify-content:space-between;gap:1
       <div class="section-head">
         <span class="eyebrow">Reservations</span>
         <h2 id="book-h">Book your stay</h2>
-        <p>Pick your dates, tell us about your rig, and pay securely by card. Your site number comes with your confirmation.</p>
+        <p id="book-intro">Pick your dates and fill out a short application. We review every application, usually within a day. Once you're approved, we email you a link to pay and lock in your site.</p>
       </div>
       <div class="book-grid">
         <form id="bookForm" novalidate>
@@ -288,7 +291,29 @@ footer .wrap{padding-block:28px;display:flex;justify-content:space-between;gap:1
               <div class="field" id="f-name"><label for="gname">Full name</label><input type="text" id="gname" autocomplete="name"><span class="err" id="e-name"></span></div>
               <div class="field" id="f-phone"><label for="gphone">Phone</label><input type="tel" id="gphone" autocomplete="tel"><span class="err" id="e-phone"></span></div>
             </div>
-            <div class="field" id="f-email"><label for="gemail">Email</label><input type="email" id="gemail" autocomplete="email"><span class="hint">Your receipt goes here.</span><span class="err" id="e-email"></span></div>
+            <div class="field" id="f-email"><label for="gemail">Email</label><input type="email" id="gemail" autocomplete="email"><span class="hint">We'll email your approval here.</span><span class="err" id="e-email"></span></div>
+          </fieldset>
+
+          <fieldset id="appFields">
+            <legend>About your stay</legend>
+            <div class="row">
+              <div class="field" id="f-adults"><label for="adults">Adults</label><input type="number" id="adults" min="1" max="12" inputmode="numeric" value="1"><span class="err" id="e-adults"></span></div>
+              <div class="field"><label for="kids">Children</label><input type="number" id="kids" min="0" max="12" inputmode="numeric" value="0"></div>
+              <div class="field"><label for="rigyear">Rig year</label><input type="text" id="rigyear" maxlength="10" inputmode="numeric" placeholder="e.g. 2019"></div>
+              <div class="field"><label for="petinfo">Pets (kind &amp; how many)</label><input type="text" id="petinfo" maxlength="200" placeholder="e.g. 2 dogs, lab mix"></div>
+              <div class="field"><label for="vehicle">Tow / extra vehicle</label><input type="text" id="vehicle" maxlength="120" placeholder="e.g. 2021 Ford F-250"></div>
+              <div class="field"><label for="plate">License plate &amp; state</label><input type="text" id="plate" maxlength="30" placeholder="e.g. MS ABC123"></div>
+            </div>
+            <div class="field" id="f-reason"><label for="reason">What brings you to the area?</label><input type="text" id="reason" maxlength="300" placeholder="Work, travel nurse, visiting family, passing through…"><span class="err" id="e-reason"></span></div>
+            <div class="field"><label for="employer">Employer or company (if here for work)</label><input type="text" id="employer" maxlength="120"></div>
+            <div class="row">
+              <div class="field" id="f-ecname"><label for="ecname">Emergency contact name</label><input type="text" id="ecname" maxlength="100"><span class="err" id="e-ecname"></span></div>
+              <div class="field" id="f-ecphone"><label for="ecphone">Emergency contact phone</label><input type="tel" id="ecphone" maxlength="30"><span class="err" id="e-ecphone"></span></div>
+            </div>
+            <div class="field"><label for="referral">How did you hear about us?</label><input type="text" id="referral" maxlength="120" placeholder="Facebook, a friend, Google…"></div>
+            <div class="field"><label for="appnotes">Anything else we should know?</label><textarea id="appnotes" maxlength="600" rows="3"></textarea></div>
+            <label class="agree" id="f-agree"><input type="checkbox" id="agree"> <span>I confirm this information is accurate and I agree to follow Riverfront Retreat's park rules.</span></label>
+            <span class="err" id="e-agree"></span>
           </fieldset>
         </form>
 
@@ -379,7 +404,7 @@ async function refresh(){
   const p = plan();
   $('f-out').hidden = p!=='nightly'; $('f-qty').hidden = p==='nightly';
   $('s-rate').textContent = {nightly:'Nightly · $'+CFG.rates.nightly, weekly:'Weekly · $'+CFG.rates.weekly, monthly:'Monthly · $'+CFG.rates.monthly}[p];
-  $('s-due-label').textContent = p==='monthly' ? 'First month, due today' : 'Due today';
+  $('s-due-label').textContent = CFG.requireApplication ? (p==='monthly' ? 'First month, due once approved' : 'Due once approved') : (p==='monthly' ? 'First month, due today' : 'Due today');
   $('e-form').textContent='';
   const my = ++seq;
   const q = new URLSearchParams(params());
@@ -398,7 +423,7 @@ async function refresh(){
   if(!data.available) note = 'All sites are booked for these dates. Try other dates or call us.';
   else if(p==='nightly' && data.qty>=7) note = (note?note+' ':'')+'Staying 7 nights or more? The weekly rate costs less.';
   $('s-note').textContent=note; $('s-note').hidden=!note;
-  $('payBtn').disabled = !data.available || !CFG.paymentsOn;
+  $('payBtn').disabled = !data.available || (!CFG.paymentsOn && !CFG.requireApplication);
 }
 
 function setErr(field,errId,msg){ $(errId).textContent=msg; $(field).classList.toggle('bad',!!msg); return !msg; }
@@ -409,23 +434,33 @@ function validate(){
   const L=+$('len').value; ok = setErr('f-len','e-len', !L?'Enter your rig length.':(L<10||L>65?'Enter a length between 10 and 65 feet.':'')) && ok;
   ok = setErr('f-name','e-name', $('gname').value.trim().length<2?'Enter your name.':'') && ok;
   ok = setErr('f-phone','e-phone', $('gphone').value.replace(/\D/g,'').length<10?'Enter a 10-digit phone number.':'') && ok;
-  ok = setErr('f-email','e-email', /^\S+@\S+\.\S+$/.test($('gemail').value.trim())?'':'Enter a valid email for your receipt.') && ok;
+  ok = setErr('f-email','e-email', /^\S+@\S+\.\S+$/.test($('gemail').value.trim())?'':'Enter a valid email.') && ok;
+  if(CFG.requireApplication){
+    ok = setErr('f-adults','e-adults', +$('adults').value>=1?'':'Enter how many adults will stay.') && ok;
+    ok = setErr('f-reason','e-reason', $('reason').value.trim()?'':'Tell us a little about your stay.') && ok;
+    ok = setErr('f-ecname','e-ecname', $('ecname').value.trim()?'':'Enter an emergency contact.') && ok;
+    ok = setErr('f-ecphone','e-ecphone', $('ecphone').value.replace(/\D/g,'').length>=10?'':'Enter a 10-digit phone number.') && ok;
+    $('e-agree').textContent = $('agree').checked ? '' : 'Please agree to the park rules.'; ok = $('agree').checked && ok;
+  }
   return ok;
 }
 
 $('bookForm').addEventListener('submit', async e => {
   e.preventDefault();
-  if(!validate()){ const f=document.querySelector('.field.bad input, .field.bad select'); if(f) f.focus(); return; }
-  const btn=$('payBtn'); btn.disabled=true; btn.textContent='Holding your site…'; $('e-form').textContent='';
+  if(!validate()){ const f=document.querySelector('.field.bad input, .field.bad select, .field.bad textarea') || (!$('agree').checked && CFG.requireApplication ? $('agree') : null); if(f) f.focus(); return; }
+  const btn=$('payBtn'), label=btn.textContent; btn.disabled=true; btn.textContent=CFG.requireApplication?'Sending your application…':'Holding your site…'; $('e-form').textContent='';
+  const base = { ...params(), name:$('gname').value, phone:$('gphone').value, email:$('gemail').value,
+      rigType:$('rig').value, rigLength:$('len').value, power:$('amp').value, pets:$('pets').value==='pets' };
+  if(CFG.requireApplication) base.details = { adults:$('adults').value, children:$('kids').value, rigYear:$('rigyear').value, petDetails:$('petinfo').value,
+      vehicle:$('vehicle').value, plate:$('plate').value, reason:$('reason').value, employer:$('employer').value,
+      emergencyName:$('ecname').value, emergencyPhone:$('ecphone').value, referral:$('referral').value, notes:$('appnotes').value, agreed:$('agree').checked };
   try{
-    const r = await fetch('/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-      ...params(), name:$('gname').value, phone:$('gphone').value, email:$('gemail').value,
-      rigType:$('rig').value, rigLength:$('len').value, power:$('amp').value, pets:$('pets').value==='pets'})});
+    const r = await fetch(CFG.requireApplication?'/api/apply':'/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(base)});
     const data = await r.json();
     if(!r.ok || !data.url) throw new Error(data.error || 'Something went wrong. Please try again.');
     window.location.href = data.url;
   }catch(err){
-    $('e-form').textContent = err.message; btn.textContent='Continue to secure payment'; btn.disabled=false; refresh();
+    $('e-form').textContent = err.message; btn.textContent=label; btn.disabled=false; refresh();
   }
 });
 
@@ -440,7 +475,15 @@ document.querySelectorAll('.copy').forEach(b=>b.addEventListener('click',()=>{
 
 (async function init(){
   try{ CFG = await (await fetch('/api/config')).json(); }catch(e){}
-  $('offline').hidden = CFG.paymentsOn; $('payBtn').hidden = !CFG.paymentsOn;
+  if(CFG.requireApplication===undefined) CFG.requireApplication=true;
+  $('appFields').hidden = !CFG.requireApplication;
+  if(CFG.requireApplication){
+    $('payBtn').textContent='Submit application'; $('payBtn').hidden=false; $('offline').hidden=true;
+    document.querySelector('.lock').textContent='No payment now. We review applications, usually within a day, then email you a link to pay.';
+  } else {
+    $('book-intro').textContent='Pick your dates, tell us about your rig, and pay securely by card. Your site number comes with your confirmation.';
+    $('offline').hidden = CFG.paymentsOn; $('payBtn').hidden = !CFG.paymentsOn;
+  }
   $('checkin').min = CFG.today; $('checkout').min = addDays(CFG.today,1);
   if(!$('checkin').value){ $('checkin').value = addDays(CFG.today,7); $('checkout').value = addDays(CFG.today,9); }
   refresh();
