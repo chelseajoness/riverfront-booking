@@ -259,8 +259,19 @@ table.grid{border-collapse:separate;border-spacing:0;font-size:.78rem}
       </form>
     </div>
     <div>
+      <h2>Phone notifications</h2>
+      <p class="hint">Get an instant pop-up on your phone for every new application, booking and payment. Free, no account needed. Do this on each phone (yours and your husband's):</p>
+      <div class="box" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;display:grid;gap:10px">
+        <div><b>1.</b> Install the free <b>ntfy</b> app: <a href="https://apps.apple.com/us/app/ntfy/id1625396347" target="_blank" rel="noopener">iPhone</a> · <a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy" target="_blank" rel="noopener">Android</a></div>
+        <div><b>2.</b> In the app, tap <b>+</b> and enter this topic name, or open the link on your phone:</div>
+        <div class="copyrow"><input id="s-topic" readonly><button type="button" id="s-copytopic">Copy</button></div>
+        <div><b>3.</b> Allow notifications, then tap <b>Send a test alert</b> below.</div>
+        <p class="hint" style="margin:0">Keep this topic name private. Anyone with it can see your alerts.</p>
+      </div>
+    </div>
+    <div>
       <h2>Booking alerts</h2>
-      <p class="hint">Who gets notified when a guest books and pays online.</p>
+      <p class="hint">Texts and emails for new bookings (these need a texting or email service connected).</p>
       <form class="box" id="set-alerts" novalidate>
         <label class="full">Alert phone numbers (texts)<input id="s-phones" maxlength="200" inputmode="tel" placeholder="601-408-1851, 601-620-8833"></label>
         <label class="full">Alert emails<input id="s-emails" maxlength="300" inputmode="email" placeholder="riverfrontretreatrvpark@gmail.com"></label>
@@ -567,7 +578,8 @@ async function loadSettings(){
   const st=data.settings;
   $('s-gate').value=st.gate_code; $('s-wifi').value=st.wifi_name; $('s-wifipw').value=st.wifi_password; $('s-note').value=st.checkin_note;
   $('s-phones').value=st.alert_phones; $('s-emails').value=st.alert_emails; $('s-reqapp').value=st.require_application==='off'?'off':'on'; $('s-hours').value=st.approval_hours||'48';
-  $('s-status').innerHTML = `Texts: <b>${data.textOn?'on':'not set up yet'}</b> · Emails: <b>${data.emailOn?'on':'not set up yet'}</b>`;
+  $('s-topic').value = st.push_topic || '';
+  $('s-status').innerHTML = `Phone notifications: <b>${data.pushOn?'on':'starting'}</b> · Texts: <b>${data.textOn?'on':'not set up yet'}</b> · Emails: <b>${data.emailOn?'on':'not set up yet'}</b>`;
 }
 async function saveSettings(e,fields,msgId){
   e.preventDefault(); $(msgId).textContent='';
@@ -578,7 +590,8 @@ async function saveSettings(e,fields,msgId){
 $('set-stay').addEventListener('submit',e=>saveSettings(e,[['s-gate','gate_code'],['s-wifi','wifi_name'],['s-wifipw','wifi_password'],['s-note','checkin_note']],'s-msg1'));
 $('set-alerts').addEventListener('submit',e=>saveSettings(e,[['s-phones','alert_phones'],['s-emails','alert_emails']],'s-msg2'));
 $('set-apps').addEventListener('submit',e=>saveSettings(e,[['s-reqapp','require_application'],['s-hours','approval_hours']],'s-msg3'));
-$('s-test').addEventListener('click',async()=>{ const {data}=await api('/api/admin/test-alert',{method:'POST'}); toast(data.ok?'Test alert sent':'Nothing sent yet: texts and email need to be set up'); });
+$('s-copytopic').addEventListener('click',e=>copy($('s-topic').value,e.target));
+$('s-test').addEventListener('click',async()=>{ const {data}=await api('/api/admin/test-alert',{method:'POST'}); toast(data.ok?'Test alert sent. Check your phone.':'Nothing was sent. Try again in a minute.'); });
 loadSettings();
 
 // Fill the Site list right away from the park settings, so it works even before bookings load

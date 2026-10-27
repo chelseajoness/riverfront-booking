@@ -233,7 +233,7 @@ async function markRequestPaid(session) {
 }
 
 // ---------- Settings (gate code, Wi-Fi, who gets alerts) ----------
-const SETTING_KEYS = ['gate_code', 'wifi_name', 'wifi_password', 'checkin_note', 'alert_emails', 'alert_phones', 'require_application', 'approval_hours'];
+const SETTING_KEYS = ['gate_code', 'wifi_name', 'wifi_password', 'checkin_note', 'alert_emails', 'alert_phones', 'require_application', 'approval_hours', 'push_topic'];
 async function getSettings() {
   const out = Object.fromEntries(SETTING_KEYS.map(k => [k, '']));
   if (!pool) return out;
@@ -275,10 +275,34 @@ async function sendText(to, body) {
   if (!r.ok) { console.error('text failed', r.status, (await r.text()).slice(0, 300)); return false; }
   return true;
 }
-// Alerts to the owners: a text to each alert phone (if texting is set up) and an email to each alert email
+// Phone push notifications through ntfy (free app, no account): the owners subscribe to a private topic name
+async function sendPush(topic, text, title) {
+  if (!topic) return false;
+  try {
+    const r = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
+      method: 'POST',
+      headers: { Title: (title || 'Riverfront Retreat').replace(/[^\x20-\x7E]/g, '').trim().slice(0, 120) || 'Riverfront Retreat',
+                 Tags: 'camping', Priority: 'high', Click: `${BASE_URL}/admin` },
+      body: text,
+    });
+    if (!r.ok) { console.error('push failed', r.status); return false; }
+    return true;
+  } catch (e) { console.error('push failed', e.message); return false; }
+}
+// Make sure there is a private, hard-to-guess push topic for this park
+async function ensurePushTopic() {
+  const { rows } = await pool.query(`SELECT value FROM settings WHERE key='push_topic'`);
+  if (rows[0] && rows[0].value) return rows[0].value;
+  const topic = 'riverfront-' + crypto.randomBytes(9).toString('base64url').replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+  await pool.query(`INSERT INTO settings (key, value) VALUES ('push_topic', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [topic]);
+  return topic;
+}
+
+// Alerts to the owners: phone push, a text to each alert phone (if texting is set up) and an email to each alert email
 async function ownerAlert(text, subject) {
   const st = await getSettings();
   const results = await Promise.all([
+    sendPush(st.push_topic, text, subject),
     ...splitList(st.alert_phones).map(p => sendText(p, text)),
     sendEmail(splitList(st.alert_emails), subject || text.slice(0, 80), `<p style="font:16px/1.5 sans-serif">${escHtml(text).replace(/\n/g, '<br>')}</p><p style="font:14px sans-serif"><a href="${BASE_URL}/admin">Open the owner page</a></p>`),
   ]);
@@ -811,12 +835,13 @@ app.post('/api/admin/applications/:id/deny', requireOwner, async (req, res) => {
 
 // ---------- Owner settings ----------
 app.get('/api/admin/settings', requireOwner, async (req, res) => {
-  res.json({ settings: await getSettings(), emailOn: !!RESEND_API_KEY, textOn: !!(TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) });
+  const st = await getSettings();
+  res.json({ settings: st, emailOn: !!RESEND_API_KEY, textOn: !!(TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM), pushOn: !!st.push_topic, pushLink: st.push_topic ? `https://ntfy.sh/${st.push_topic}` : '' });
 });
 app.put('/api/admin/settings', requireOwner, async (req, res) => {
   const b = req.body || {};
   for (const k of SETTING_KEYS) {
-    if (typeof b[k] !== 'string') continue;
+    if (typeof b[k] !== 'string' || k === 'push_topic') continue;
     await pool.query(`INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [k, b[k].trim().slice(0, 500)]);
   }
   res.json({ settings: await getSettings() });
@@ -847,6 +872,7 @@ async function connectDb(attempt = 1) {
   try {
     if (!pool) pool = makePool();
     await migrate();
+    await ensurePushTopic();
     dbReady = true;
     console.log('Database ready');
   } catch (e) {
