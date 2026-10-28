@@ -148,6 +148,8 @@ function todayLocal() {
 }
 const nightsBetween = (a, b) => Math.round((toD(b) - toD(a)) / DAY);
 const fmtDate = s => toD(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+// Same clock as the approval email, so a text reminder names the same pay-by time.
+const fmtPayBy = ts => new Date(ts).toLocaleString('en-US', { timeZone: PARK.timeZone, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 // Works out the stay from what the guest picked. Throws a readable message on bad input.
 function quote({ plan, checkIn, checkOut, count }) {
@@ -556,11 +558,30 @@ app.get('/admin', requireOwner, (req, res) => res.sendFile(path.join(__dirname, 
 app.get('/api/admin/bookings', requireOwner, async (req, res) => {
   const from = isISO(req.query.from) ? req.query.from : addDays(todayLocal(), -7);
   const { rows } = await pool.query(
-    `SELECT *, (status='pending' AND hold_expires > now()) AS holding FROM bookings
-      WHERE check_out >= $1 AND (status IN ('confirmed','blocked') OR (status='pending' AND hold_expires > now()))
-      ORDER BY check_in, site`, [from]);
-  res.json({ today: todayLocal(), sites: PARK.sites, bookings: rows.map(r => ({ ...r, check_in: iso(r.check_in), check_out: iso(r.check_out) })) });
+    `SELECT b.*, (b.status='pending' AND b.hold_expires > now()) AS holding,
+            a.token AS apply_token
+       FROM bookings b
+       LEFT JOIN applications a ON a.id = b.application_id
+      WHERE b.check_out >= $1
+        AND (b.status IN ('confirmed','blocked') OR (b.status='pending' AND b.hold_expires > now()))
+      ORDER BY b.check_in, b.site`, [from]);
+  res.json({ today: todayLocal(), sites: PARK.sites, bookings: rows.map(ownerBooking) });
 });
+
+// The guest pay link (/apply/{token}) and the hold deadline are owner-only.
+// Public routes keep using the guest's own link and never list these tokens.
+function ownerBooking(r) {
+  const row = { ...r, check_in: iso(r.check_in), check_out: iso(r.check_out) };
+  const awaiting = r.status === 'pending' && r.application_id && r.apply_token
+    && r.hold_expires && new Date(r.hold_expires) > new Date();
+  delete row.apply_token;
+  if (awaiting) {
+    row.applyToken = r.apply_token;
+    row.payUrl = `${BASE_URL}/apply/${r.apply_token}`;
+    row.payBy = fmtPayBy(r.hold_expires);
+  }
+  return row;
+}
 
 // Owner adds a phone/walk-in booking or blocks a site
 app.post('/api/admin/bookings', requireOwner, async (req, res) => {
@@ -812,7 +833,7 @@ app.post('/api/admin/applications/:id/approve', requireOwner, async (req, res) =
   } catch (e) { await client.query('ROLLBACK'); console.error(e); return res.status(500).json({ error: 'Could not approve. Try again.' }); }
   finally { client.release(); }
 
-  const payBy = new Date(booking.hold_expires).toLocaleString('en-US', { timeZone: PARK.timeZone, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const payBy = fmtPayBy(booking.hold_expires);
   const emailed = await sendEmail(a.guest_email, `You're approved! Pay to lock in Site ${booking.site} · Riverfront Retreat`, emailWrap(
     `<h2 style="font-family:Georgia,serif;margin:0 0 8px">You're approved, ${escHtml(a.guest_name.split(' ')[0])}!</h2>
      <p>Your application for <b>${fmtDate(iso(a.check_in))} to ${fmtDate(iso(a.check_out))}</b> is approved, and we're holding <b>Site ${booking.site}</b> for you.</p>

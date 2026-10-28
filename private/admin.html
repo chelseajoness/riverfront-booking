@@ -89,6 +89,15 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--river);b
 .copyrow{display:flex;gap:8px;flex-wrap:wrap}
 .copyrow input,.copyrow textarea{flex:1 1 240px;background:var(--surface);resize:vertical}
 .copyrow button{flex:0 0 auto}
+.pay-fallback{grid-column:1/-1;display:grid;gap:4px}
+.pay-fallback input{background:var(--surface);font-size:16px}
+.pay-fallback .hint{margin:0;font-size:.82rem}
+.cell-detail{margin-top:12px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;display:grid;gap:8px}
+.cell-detail .name{font-weight:600;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.cell-detail .meta{color:var(--muted);font-size:.88rem;overflow-wrap:anywhere}
+.cell-detail .acts{display:flex;flex-wrap:wrap;gap:8px}
+.card .acts .btn,.cell-detail .acts button,.cell-detail .acts .btn{text-align:center;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+.cell-detail .acts button,.cell-detail .acts .btn{flex:1 1 140px}
 
 /* calendar */
 .gridwrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;-webkit-overflow-scrolling:touch}
@@ -121,9 +130,10 @@ table.grid{border-collapse:separate;border-spacing:0;font-size:.78rem}
   form.box button.primary{width:100%;min-height:48px;font-size:1rem}
   .card{grid-template-columns:auto 1fr;padding:12px}
   .badge{width:46px;height:46px}
-  .card>.acts{grid-row:auto;grid-column:1/-1;flex-direction:row;order:10}
+  .card>.acts{grid-row:auto;grid-column:1/-1;flex-direction:row;flex-wrap:wrap;order:10}
   .card .acts:empty{display:none}
-  .card .acts button{flex:1}
+  .card .acts button,.card .acts .btn{flex:1 1 9rem}
+  .pay-fallback{order:11}
   h2{font-size:1.25rem}
 }
 @media (prefers-reduced-motion:no-preference){.panel{animation:in .18s ease-out}@keyframes in{from{opacity:.4;transform:translateY(4px)}to{opacity:1;transform:none}}}
@@ -177,6 +187,7 @@ table.grid{border-collapse:separate;border-spacing:0;font-size:.78rem}
       <div class="gridwrap"><table class="grid" id="grid"></table></div>
       <div class="legend"><span><i style="background:var(--river)"></i>Booked</span><span><i style="background:var(--amber-soft)"></i>Paying now</span><span><i style="background:var(--block)"></i>Blocked</span></div>
       <p class="hint" id="cellinfo" style="margin-top:10px" aria-live="polite"></p>
+      <div id="celldetail" hidden></div>
     </div>
   </section>
 
@@ -307,6 +318,62 @@ async function copy(txt,btn){
   try{ await navigator.clipboard.writeText(txt); const o=btn.textContent; btn.textContent='Copied ✓'; setTimeout(()=>btn.textContent=o,1600); }
   catch(e){ const t=$('nl-msg'); t.focus(); t.select(); }
 }
+function approvedHold(b){ return !!(b && b.status==='pending' && b.application_id); }
+function awaitingPay(b){ return approvedHold(b) && !!b.payUrl; }
+function payByText(b){
+  if(!b) return '';
+  if(b.payBy) return b.payBy;
+  if(!b.hold_expires) return '';
+  return new Date(b.hold_expires).toLocaleString('en-US',{timeZone:'America/Chicago',weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+}
+function smsNumber(phone){
+  const raw=String(phone||'').replace(/[^\d+]/g,'');
+  const digits=raw.replace(/\D/g,'');
+  if(digits.length<10) return '';
+  if(raw.startsWith('+')) return '+'+digits;
+  if(digits.length===10) return '+1'+digits;
+  if(digits.length===11 && digits.startsWith('1')) return '+'+digits;
+  return '+'+digits;
+}
+function reminderText(b){
+  const first=(b.guest_name||'there').trim().split(/\s+/)[0]||'there';
+  return `Hi ${first}, this is Chelsea at Riverfront Retreat RV Park. Just a reminder your Site ${b.site} is held until ${payByText(b)}. Pay ${money(b.amount_cents)} here to lock it in: ${b.payUrl}`;
+}
+// iPhone opens the body from "&body="; Android from "?body=". encodeURIComponent
+// keeps spaces as %20 — a "+" is left as a plus sign on some phones.
+function smsHref(phone, body){
+  const num=smsNumber(phone);
+  if(!num) return '';
+  const ios=/iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+  return 'sms:'+num+(ios?'&':'?')+'body='+encodeURIComponent(body);
+}
+function payFallbackHtml(url){
+  return `<div class="pay-fallback" hidden><input readonly aria-label="Payment link" value="${esc(url)}"><span class="hint">Select the link and copy it.</span></div>`;
+}
+function payActionHtml(b){
+  if(!awaitingPay(b)) return '';
+  const text=smsNumber(b.guest_phone)?`<a class="btn" href="${esc(smsHref(b.guest_phone, reminderText(b)))}">Text reminder</a>`:'';
+  return `<button type="button" data-copypay="${b.id}">Copy pay link</button>${text}`;
+}
+function copyPayLink(url, btn){
+  const mark=()=>{ const o=btn.textContent; btn.textContent='Copied ✓'; setTimeout(()=>{ if(btn.isConnected) btn.textContent=o; },1600); };
+  const reveal=()=>{
+    const root=btn.closest('.card, .cell-detail');
+    const box=root&&root.querySelector('.pay-fallback');
+    if(!box) return;
+    box.hidden=false;
+    const input=box.querySelector('input');
+    setTimeout(()=>{
+      input.removeAttribute('readonly');
+      input.focus();
+      try{ input.select(); input.setSelectionRange(0, input.value.length); }catch(e){}
+      input.setAttribute('readonly','');
+    }, 30);
+  };
+  if(navigator.clipboard && window.isSecureContext && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(mark, reveal);
+  } else reveal();
+}
 function confirmTap(btn,label,run){
   if(btn.dataset.armed){ run(); return; }
   btn.dataset.armed='1'; const o=btn.textContent; btn.textContent=label; btn.classList.add('danger-confirm');
@@ -351,8 +418,9 @@ function render(){
       if(!b) return '<td></td>';
       const cls=b.status==='blocked'?'x':b.status==='pending'?'p':'b';
       const t=b.status==='blocked'?'Blocked':(b.guest_name||'Guest');
-      const info=b.status==='blocked'?`Site ${s}: blocked${b.notes?' ('+b.notes+')':''}, ${short(b.check_in)} through ${short(addDays(b.check_out,-1))}`:`Site ${s}: ${t}, ${short(b.check_in)} to ${short(b.check_out)}`;
-      return `<td class="${cls}" title="${esc(info)}" data-info="${esc(info)}">${b.check_in===d||d===today?esc((t||'').split(' ')[0].slice(0,5)):''}</td>`;
+      const held=approvedHold(b)&&payByText(b)?`, held until ${payByText(b)}`:'';
+      const info=b.status==='blocked'?`Site ${s}: blocked${b.notes?' ('+b.notes+')':''}, ${short(b.check_in)} through ${short(addDays(b.check_out,-1))}`:`Site ${s}: ${t}, ${short(b.check_in)} to ${short(b.check_out)}${held}`;
+      return `<td class="${cls}" title="${esc(info)}" data-info="${esc(info)}" data-id="${b.id}">${b.check_in===d||d===today?esc((t||'').split(' ')[0].slice(0,5)):''}</td>`;
     }).join('')+'</tr>';
   }
   $('grid').innerHTML=h;
@@ -360,25 +428,57 @@ function render(){
   // upcoming
   const up=live.filter(b=>b.check_out>=today);
   $('list').innerHTML = up.length ? up.map(b=>{
-    const pill = b.status==='blocked'?'<span class="pill block">Blocked</span>':b.status==='pending'&&b.application_id?`<span class="pill hold">Approved · awaiting payment</span>`:b.status==='pending'?'<span class="pill hold">Paying now</span>':(b.source==='owner'?'<span class="pill">Phone</span>':'<span class="pill">Paid online</span>');
+    const awaiting = awaitingPay(b);
+    const heldStay = approvedHold(b);
+    const pill = b.status==='blocked'?'<span class="pill block">Blocked</span>':heldStay?`<span class="pill hold">Approved · awaiting payment</span>`:b.status==='pending'?'<span class="pill hold">Paying now</span>':(b.source==='owner'?'<span class="pill">Phone</span>':'<span class="pill">Paid online</span>');
     const alert = (b.notes||'').startsWith('PAID BUT') ? '<span class="pill alert">Needs attention</span>' : '';
     const here = b.check_in<=today && b.check_out>today && b.status==='confirmed' ? '<span class="pill">Here now</span>' : '';
     const rig = b.rig_type ? `${esc(RIG[b.rig_type]||b.rig_type)} · ${b.rig_length||'?'} ft · ${esc(b.power||'')}${b.pets?' · pets':''}` : '';
     const phone = b.guest_phone ? `<a href="tel:${esc(b.guest_phone.replace(/[^\d+]/g,''))}">${esc(b.guest_phone)}</a>` : '';
     const contact=[phone, b.guest_email?esc(b.guest_email):''].filter(Boolean).join(' · ');
     const title = b.status==='blocked'?(b.notes||'Blocked'):(b.guest_name||'Guest');
+    const amountBit = b.amount_cents ? (heldStay ? ` · ${money(b.amount_cents)} due` : ` · ${money(b.amount_cents)} paid`) : '';
+    const acts = awaiting ? payActionHtml(b) : `${b.status==='confirmed'&&b.guest_email?`<button data-sendcode="${b.id}">Send gate code</button>`:''}${b.status==='pending'?'':`<button data-cancel="${b.id}">${b.status==='blocked'?'Remove block':'Cancel'}</button>`}`;
+    const held = heldStay && payByText(b) ? `<div class="meta">Held until ${esc(payByText(b))}</div>` : '';
     return `<div class="card"><div class="badge"><span><small>Site</small>${b.site}</span></div>
       <div class="name">${esc(title)} ${here}${pill}${alert}</div>
-      <div class="acts">${b.status==='confirmed'&&b.guest_email?`<button data-sendcode="${b.id}">Send gate code</button>`:''}${b.status==='pending'?'':`<button data-cancel="${b.id}">${b.status==='blocked'?'Remove block':'Cancel'}</button>`}</div>
-      <div class="meta">${b.status==='blocked'?`Closed ${short(b.check_in)} through ${short(addDays(b.check_out,-1))}`:`${short(b.check_in)} → ${short(b.check_out)} · ${esc(b.plan==='owner'?'phone booking':b.plan)}`}${b.amount_cents?` · ${money(b.amount_cents)} paid`:''}</div>
+      <div class="acts">${acts}</div>
+      <div class="meta">${b.status==='blocked'?`Closed ${short(b.check_in)} through ${short(addDays(b.check_out,-1))}`:`${short(b.check_in)} → ${short(b.check_out)} · ${esc(b.plan==='owner'?'phone booking':b.plan)}`}${amountBit}</div>
+      ${held}
       ${contact||rig?`<div class="meta">${[contact,rig].filter(Boolean).join('<br>')}</div>`:''}
-      ${b.notes&&b.status!=='blocked'?`<div class="meta">${esc(b.notes)}</div>`:''}</div>`;
+      ${b.notes&&b.status!=='blocked'?`<div class="meta">${esc(b.notes)}</div>`:''}
+      ${awaiting?payFallbackHtml(b.payUrl):''}</div>`;
   }).join('') : '<p class="empty">No upcoming stays yet. Add a phone booking from the Add tab, or wait for online bookings.</p>';
+  const openCell=document.querySelector('#celldetail [data-copypay]');
+  if(openCell) showCellDetail(bookings.find(x=>String(x.id)===openCell.dataset.copypay));
   fillStays();
   renderApps();
 }
-$('grid').addEventListener('click',e=>{ const td=e.target.closest('td[data-info]'); $('cellinfo').textContent=td?td.dataset.info:''; });
+function showCellDetail(b){
+  const box=$('celldetail');
+  if(!b || !approvedHold(b)){ box.hidden=true; box.innerHTML=''; return; }
+  box.hidden=false;
+  box.innerHTML=`<div class="cell-detail">
+    <div class="name">${esc(b.guest_name||'Guest')} <span class="pill hold">Approved · awaiting payment</span></div>
+    <div class="meta">Site ${b.site} · ${short(b.check_in)} → ${short(b.check_out)}${payByText(b)?` · held until ${esc(payByText(b))}`:''}${b.amount_cents?` · ${money(b.amount_cents)} due`:''}</div>
+    <div class="acts">${payActionHtml(b)}</div>
+    ${b.payUrl?payFallbackHtml(b.payUrl):''}
+  </div>`;
+}
+$('grid').addEventListener('click',e=>{
+  const td=e.target.closest('td[data-info]');
+  $('cellinfo').textContent=td?td.dataset.info:'';
+  const b=td&&DATA?DATA.bookings.find(x=>String(x.id)===td.dataset.id):null;
+  showCellDetail(b);
+});
+$('celldetail').addEventListener('click',e=>{
+  const c=e.target.closest('[data-copypay]'); if(!c||!DATA) return;
+  const b=DATA.bookings.find(x=>String(x.id)===c.dataset.copypay);
+  if(b&&b.payUrl) copyPayLink(b.payUrl, c);
+});
 $('list').addEventListener('click',async e=>{
+  const cp=e.target.closest('[data-copypay]');
+  if(cp){ const b=DATA&&DATA.bookings.find(x=>String(x.id)===cp.dataset.copypay); if(b&&b.payUrl) copyPayLink(b.payUrl, cp); return; }
   const sc=e.target.closest('[data-sendcode]');
   if(sc){ sc.disabled=true; const {ok,data}=await api(`/api/admin/bookings/${sc.dataset.sendcode}/send-code`,{method:'POST'}); sc.disabled=false; toast(ok?'Gate code emailed':(data.error||'Could not send')); return; }
   const btn=e.target.closest('[data-cancel]'); if(!btn) return;
