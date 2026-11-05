@@ -57,8 +57,8 @@ const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
       ${b.checkinNote?`<p class="muted">${esc(b.checkinNote)}</p>`:''}
       ${b.note?`<p class="muted">${esc(b.note)}</p>`:''}
       <p class="muted">Your receipt and these details are on their way by email. Questions? Call or text (601) 408-1851 or (601) 620-8833.</p>
-      <p class="muted">120 Old Hwy 24, New Augusta, MS 39462</p>
-      <a class="btn" href="https://www.google.com/maps/search/?api=1&query=120+Old+Hwy+24+New+Augusta+MS+39462">Get directions</a>`;
+      <p class="muted">38 Old Hwy 24, New Augusta, MS 39462</p>
+      <a class="btn" href="https://www.google.com/maps/search/?api=1&query=38+Old+Hwy+24+New+Augusta+MS+39462">Get directions</a>`;
   }catch(e){
     document.getElementById('h').textContent='We couldn\'t confirm this booking';
     document.getElementById('msg').textContent = e.message + ' Call (601) 408-1851 or (601) 620-8833.';
