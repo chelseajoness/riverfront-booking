@@ -335,7 +335,7 @@ async function notifyBooking(b) {
         <p>Your RV site at Riverfront Retreat RV Park is confirmed.</p>
         <table style="border-collapse:collapse;margin:12px 0">${rows}</table>
         ${st.checkin_note ? `<p>${escHtml(st.checkin_note)}</p>` : ''}
-        <p><b>Address:</b> 120 Old Hwy 24, New Augusta, MS 39462<br><a href="https://www.google.com/maps/search/?api=1&query=120+Old+Hwy+24+New+Augusta+MS+39462">Get directions</a></p>
+        <p><b>Address:</b> 38 Old Hwy 24, New Augusta, MS 39462<br><a href="https://www.google.com/maps/search/?api=1&query=38+Old+Hwy+24+New+Augusta+MS+39462">Get directions</a></p>
         <p>Questions? Call or text (601) 408-1851 or (601) 620-8833, or reply to this email.</p>
       </div>`);
   }
@@ -688,7 +688,7 @@ app.post('/api/pay/:token/checkout', async (req, res) => {
 
 // ---------- Applications: guest applies → owner approves → guest pays → confirmed ----------
 const RIG_NAMES = { ClassA: 'Class A', ClassB: 'Class B', ClassC: 'Class C', '5thWheel': 'Fifth wheel', TravelTrailer: 'Travel trailer', Other: 'Other rig' };
-const emailWrap = inner => `<div style="font:16px/1.5 -apple-system,Segoe UI,sans-serif;color:#16231E;max-width:520px">${inner}<p style="color:#56635C;font-size:14px">Riverfront Retreat RV Park · 120 Old Hwy 24, New Augusta, MS 39462 · (601) 408-1851 or (601) 620-8833</p></div>`;
+const emailWrap = inner => `<div style="font:16px/1.5 -apple-system,Segoe UI,sans-serif;color:#16231E;max-width:520px">${inner}<p style="color:#56635C;font-size:14px">Riverfront Retreat RV Park · 38 Old Hwy 24, New Augusta, MS 39462 · (601) 408-1851 or (601) 620-8833</p></div>`;
 const appLink = a => `${BASE_URL}/apply/${a.token}`;
 
 app.post('/api/apply', async (req, res) => {
@@ -858,7 +858,7 @@ app.post('/api/admin/bookings/:id/send-code', requireOwner, async (req, res) => 
   const st = await getSettings();
   const rows = stayLines(b, st).map(([k, v]) => `<tr><td style="padding:6px 16px 6px 0;color:#56635C">${k}</td><td style="padding:6px 0;font-weight:600">${escHtml(v)}</td></tr>`).join('');
   const ok = await sendEmail(b.guest_email, `Your gate code for Riverfront Retreat (Site ${b.site})`,
-    `<div style="font:16px/1.5 -apple-system,Segoe UI,sans-serif;color:#16231E;max-width:520px"><p>Hi ${escHtml((b.guest_name || '').split(' ')[0])}, here are your stay details:</p><table style="border-collapse:collapse;margin:12px 0">${rows}</table>${st.checkin_note ? `<p>${escHtml(st.checkin_note)}</p>` : ''}<p>120 Old Hwy 24, New Augusta, MS 39462 · (601) 408-1851</p></div>`);
+    `<div style="font:16px/1.5 -apple-system,Segoe UI,sans-serif;color:#16231E;max-width:520px"><p>Hi ${escHtml((b.guest_name || '').split(' ')[0])}, here are your stay details:</p><table style="border-collapse:collapse;margin:12px 0">${rows}</table>${st.checkin_note ? `<p>${escHtml(st.checkin_note)}</p>` : ''}<p>38 Old Hwy 24, New Augusta, MS 39462 · (601) 408-1851</p></div>`);
   res.status(ok ? 200 : 502).json(ok ? { ok: true } : { error: 'The email could not be sent.' });
 });
 
